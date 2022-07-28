@@ -108,40 +108,24 @@ print(string.format(string.gsub(str, '[\r\n]', {
     ['\n'] = '\\n\n',
 })))
 --[[
---example_boundary
-Content-Disposition: form-data; name="qux"
-
-qux
---example_boundary
-Content-Disposition: form-data; name="qux"
-
-
---example_boundary
-Content-Disposition: form-data; name="foo"; filename="bar.txt"
-
-bar
---example_boundary
-Content-Disposition: form-data; name="foo"
-
-hello world
---example_boundary--
-MacBookPro-152:lua-form-multipart mah$ lua ./example.lua
---example_boundary
-Content-Disposition: form-data; name="foo"; filename="bar.txt"
-
-bar
---example_boundary
-Content-Disposition: form-data; name="foo"
-
-hello world
---example_boundary
-Content-Disposition: form-data; name="qux"
-
-qux
---example_boundary
-Content-Disposition: form-data; name="qux"
-
-
+--example_boundary\r\n
+X-Example: example header1\r\n
+X-Example: example header2\r\n
+Content-Disposition: form-data; name="foo"; filename="bar.txt"\r\n
+\r\n
+bar\r\n
+--example_boundary\r\n
+Content-Disposition: form-data; name="foo"\r\n
+\r\n
+hello world\r\n
+--example_boundary\r\n
+Content-Disposition: form-data; name="qux"\r\n
+\r\n
+qux\r\n
+--example_boundary\r\n
+Content-Disposition: form-data; name="qux"\r\n
+\r\n
+\r\n
 --example_boundary--
 --]]
 ```

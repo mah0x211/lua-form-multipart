@@ -204,7 +204,9 @@ local function encode_part(ctx, name, part, encode_body)
     if part.header then
         -- add headers
         for key, vals in pairs(part.header) do
-            if is_table(vals) then
+            -- write only values with the valid key
+            if is_table(vals) and is_string(key) and #key > 0 and
+                not find(key, '%s') then
                 for _, v in ipairs(vals) do
                     local s = format('%s: %s\r\n', key, tostring(v))
                     n, err = writer:write(s)

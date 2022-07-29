@@ -145,7 +145,7 @@ local function encode_body_file(ctx, name, part)
     while s do
         local n
         n, err = writer:write(s)
-        if not n then
+        if err then
             break
         end
         nbyte = nbyte + n
@@ -208,7 +208,7 @@ local function encode_body(ctx, name, part)
                 for _, v in ipairs(vals) do
                     local s = format('%s: %s\r\n', key, tostring(v))
                     local n, err = writer:write(s)
-                    if not n then
+                    if err then
                         return nil, err
                     end
                     nbyte = nbyte + n
@@ -223,7 +223,7 @@ local function encode_body(ctx, name, part)
         local s =
             format('Content-Disposition: form-data; name=%q\r\n\r\n', name)
         local n, err = writer:write(s)
-        if not n then
+        if err then
             return nil, err
         end
         nbyte = nbyte + n
@@ -244,7 +244,7 @@ local function encode_body(ctx, name, part)
                   'Content-Disposition: form-data; name=%q; filename=%q\r\n\r\n',
                   name, part.filename)
     local n, err = writer:write(s)
-    if not n then
+    if err then
         return nil, err
     end
     nbyte = nbyte + n
@@ -272,7 +272,7 @@ local function encode_form(ctx, form)
             for _, part in ipairs(parts) do
                 -- write delimiter
                 local n, err = writer:write(delimiter)
-                if not n then
+                if err then
                     return nil, err
                 end
                 nbyte = nbyte + n
@@ -286,7 +286,7 @@ local function encode_form(ctx, form)
 
                 -- write CRLF
                 n, err = writer:write('\r\n')
-                if not n then
+                if err then
                     return nil, err
                 end
                 nbyte = nbyte + n
@@ -296,7 +296,7 @@ local function encode_form(ctx, form)
 
     -- write close-delimiter
     local n, err = writer:write(ctx.close_delimiter)
-    if not n then
+    if err then
         return nil, err
     end
     return nbyte + n

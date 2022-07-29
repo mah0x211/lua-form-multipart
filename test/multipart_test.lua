@@ -21,9 +21,11 @@ end
 function testcase.encode()
     local file = assert(io.tmpfile())
     file:write('baz file')
+    file:seek('set')
 
     local form = {
         foo = {
+            'string value',
             {
                 header = {
                     ['X-Example'] = {
@@ -35,6 +37,7 @@ function testcase.encode()
                 pathname = PATHNAME_BAR,
                 data = 'if the filename is defined, this data will be ignored',
             },
+            true,
             {
                 data = 'hello world',
             },
@@ -46,16 +49,22 @@ function testcase.encode()
             },
         },
         qux = {
+            123,
             {
                 data = 'qux',
             },
             {
                 -- empty data
             },
+            false,
+            {
+                data = '',
+            },
         },
     }
 
     -- test that encode a form table to string
+    file:seek('set')
     local str = ''
     local n = assert(multipart.encode({
         write = function(_, s)
@@ -67,11 +76,25 @@ function testcase.encode()
     for _, part in ipairs({
         table.concat({
             '--test_boundary',
+            'Content-Disposition: form-data; name="foo"',
+            '',
+            'string value',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
             'X-Example: example header1',
             'X-Example: example header2',
             'Content-Disposition: form-data; name="foo"; filename="bar.txt"',
             '',
             'bar file',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="foo"',
+            '',
+            'true',
             '',
         }, '\r\n'),
         table.concat({
@@ -92,7 +115,21 @@ function testcase.encode()
             '--test_boundary',
             'Content-Disposition: form-data; name="qux"',
             '',
+            '123',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="qux"',
+            '',
             'qux',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="qux"',
+            '',
+            'false',
             '',
         }, '\r\n'),
         table.concat({

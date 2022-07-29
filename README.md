@@ -32,6 +32,8 @@ encode a form table to string in `multipart/form-data` format.
     {
         -- encode to body-part
         <name>:string = {
+            <value>:string|boolean|number,
+            -- table value
             {
                 -- encode to MIME-part-headers
                 header:table|nil = {
@@ -70,6 +72,7 @@ local multipart = require('form.multipart')
 -- encode a form table to multipart/form-data format string
 local f = assert(io.tmpfile())
 f:write('bar')
+f:seek('set') -- the file position indicator must be set manually
 local str = ''
 local n = assert(multipart.encode({
     write = function(_, s)
@@ -78,6 +81,7 @@ local n = assert(multipart.encode({
     end,
 }, {
     foo = {
+        'string value',
         {
             header = {
                 ['X-Example'] = {
@@ -87,8 +91,9 @@ local n = assert(multipart.encode({
             },
             filename = 'bar.txt',
             file = f,
-            data = 'if the filename is defined, this data will be ignored',
+            data = 'if filename field is defined, data field is ignored',
         },
+        true,
         {
             data = 'hello world',
         },
@@ -98,8 +103,10 @@ local n = assert(multipart.encode({
             data = 'qux',
         },
         {
-            -- empty data
+            -- if file or pathname field is not defined, this part is ignored
+            filename = 'ignore',
         },
+        123,
     },
 }, 'example_boundary'))
 assert(n == #str)
@@ -109,11 +116,19 @@ print(string.format(string.gsub(str, '[\r\n]', {
 })))
 --[[
 --example_boundary\r\n
+Content-Disposition: form-data; name="foo"\r\n
+\r\n
+string value\r\n
+--example_boundary\r\n
 X-Example: example header1\r\n
 X-Example: example header2\r\n
 Content-Disposition: form-data; name="foo"; filename="bar.txt"\r\n
 \r\n
 bar\r\n
+--example_boundary\r\n
+Content-Disposition: form-data; name="foo"\r\n
+\r\n
+true\r\n
 --example_boundary\r\n
 Content-Disposition: form-data; name="foo"\r\n
 \r\n
@@ -125,7 +140,7 @@ qux\r\n
 --example_boundary\r\n
 Content-Disposition: form-data; name="qux"\r\n
 \r\n
-\r\n
+123\r\n
 --example_boundary--
 --]]
 ```

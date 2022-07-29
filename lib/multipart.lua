@@ -27,6 +27,7 @@ local gmatch = string.gmatch
 local lower = string.lower
 local remove = os.remove
 local pcall = pcall
+local open = io.open
 local isa = require('isa')
 local is_string = isa.string
 local is_file = isa.file
@@ -108,138 +109,19 @@ local gcfn = require('gcfn')
 -- epilogue := discard-text
 --
 
---- encode_body_file
+--- encode_part_file
 --- @param ctx table
 --- @param name string
 --- @param part table
 --- @return integer|nil nbyte
 --- @return any err
-local function encode_body_file(ctx, name, part)
+local function encode_part_file(ctx, name, part)
     local writer = ctx.writer
     local chunksize = ctx.chunksize
-    local nbyte = 0
     local file = part.file
-    local tmpfile
-
-    if file == nil then
-        -- open file
-        if not part.pathname then
-            return nil, format('cannot encode file of %q: pathname not defined',
-                               name)
-        end
-
-        local err
-        tmpfile, err = io.open(part.pathname)
-        if not tmpfile then
-            return nil, format('failed to open file %q for %q: %s',
-                               part.pathname, name, err)
-        end
-        file = tmpfile
-        ctx.tmpfile = tmpfile
-    elseif not is_file(file) then
-        return nil, format('file field in %q must be file*', name)
-    end
-
-    file:seek('set')
-    local s, err = file:read(chunksize)
-    while s do
-        local n
-        n, err = writer:write(s)
-        if err then
-            break
-        end
-        nbyte = nbyte + n
-        s, err = file:read(chunksize)
-    end
-
-    -- close file
-    if tmpfile then
-        ctx.tmpfile = nil
-        tmpfile:close()
-    end
-
-    if err then
-        return nil, format('failed to read file %q in %q: %s', part.pathname,
-                           name, err)
-    end
-
-    return nbyte
-end
-
---- encode_body_data
---- @param ctx table
---- @param name string
---- @param part table
---- @return integer|nil nbyte
---- @return any err
-local function encode_body_data(ctx, name, part)
-    local writer = ctx.writer
-    local data = part.data
-
-    if data == nil then
-        -- empty-data
-        return 0
-    elseif not is_string(data) then
-        return nil, format('cannot encode non-string data of %q', name)
-    end
-
-    -- write data
-    return writer:write(data)
-end
-
---- encode_body
---- @param ctx table
---- @param name string
---- @param part table
---- @return integer|nil nbyte
---- @return any err
-local function encode_body(ctx, name, part)
-    local writer = ctx.writer
     local nbyte = 0
-
-    -- add headers
-    if part.header ~= nil then
-        if not is_table(part.header) then
-            return nil, format('header field in %q must be table', name)
-        end
-
-        for key, vals in pairs(part.header) do
-            if is_table(vals) then
-                for _, v in ipairs(vals) do
-                    local s = format('%s: %s\r\n', key, tostring(v))
-                    local n, err = writer:write(s)
-                    if err then
-                        return nil, err
-                    end
-                    nbyte = nbyte + n
-                end
-            end
-        end
-    end
 
     -- write content-disposition header
-    if part.filename == nil then
-        -- write content-disposition header
-        local s =
-            format('Content-Disposition: form-data; name=%q\r\n\r\n', name)
-        local n, err = writer:write(s)
-        if err then
-            return nil, err
-        end
-        nbyte = nbyte + n
-
-        -- encode body data
-        n, err = encode_body_data(ctx, name, part)
-        if not n then
-            return nil, err
-        end
-        return nbyte + n
-
-    elseif not is_string(part.filename) then
-        return nil, format('filename field in %q must be string', name)
-    end
-
-    -- write content-disposition header for file
     local s = format(
                   'Content-Disposition: form-data; name=%q; filename=%q\r\n\r\n',
                   name, part.filename)
@@ -249,13 +131,112 @@ local function encode_body(ctx, name, part)
     end
     nbyte = nbyte + n
 
-    -- encode body file
-    n, err = encode_body_file(ctx, name, part)
-    if not n then
+    -- write file content
+    s, err = file:read(chunksize)
+    while s do
+        n, err = writer:write(s)
+        if err then
+            return nil, err
+        end
+        nbyte = nbyte + n
+        s, err = file:read(chunksize)
+    end
+
+    if err then
+        return nil, format('failed to read file %q in %q: %s', part.filename,
+                           name, err)
+    end
+
+    return nbyte
+end
+
+--- encode_part_data
+--- @param ctx table
+--- @param name string
+--- @param part table
+--- @return integer|nil nbyte
+--- @return any err
+local function encode_part_data(ctx, name, part)
+    local writer = ctx.writer
+    local data = part.data
+    local nbyte = 0
+
+    -- write content-disposition header
+    local s = format('Content-Disposition: form-data; name=%q\r\n\r\n', name)
+    local n, err = writer:write(s)
+    if err then
+        return nil, err
+    end
+    nbyte = nbyte + n
+
+    if not is_string(data) then
+        data = tostring(data)
+    end
+
+    -- write data
+    n, err = writer:write(data)
+    if err then
         return nil, err
     end
     return nbyte + n
 end
+
+--- encode_part
+--- @param ctx table
+--- @param name string
+--- @param part table
+--- @param encode_body function
+--- @return integer|nil nbyte
+--- @return any err
+local function encode_part(ctx, name, part, encode_body)
+    local delimiter = ctx.delimiter
+    local writer = ctx.writer
+    local nbyte = 0
+
+    -- write delimiter
+    local n, err = writer:write(delimiter)
+    if err then
+        return nil, err
+    end
+    nbyte = nbyte + n
+
+    -- verify headers
+    if part.header then
+        -- add headers
+        for key, vals in pairs(part.header) do
+            if is_table(vals) then
+                for _, v in ipairs(vals) do
+                    local s = format('%s: %s\r\n', key, tostring(v))
+                    n, err = writer:write(s)
+                    if err then
+                        return nil, err
+                    end
+                    nbyte = nbyte + n
+                end
+            end
+        end
+    end
+
+    -- write body-part
+    n, err = encode_body(ctx, name, part)
+    if not n then
+        return nil, err
+    end
+    nbyte = nbyte + n
+
+    -- write CRLF
+    n, err = writer:write('\r\n')
+    if err then
+        return nil, err
+    end
+    return nbyte + n
+end
+
+local VALID_DATATYPE = {
+    ['string'] = true,
+    ['number'] = true,
+    ['boolean'] = true,
+}
 
 --- encode_form
 --- @param ctx table
@@ -263,33 +244,72 @@ end
 --- @return integer|nil nbyte
 --- @return any err
 local function encode_form(ctx, form)
-    local delimiter = ctx.delimiter
     local writer = ctx.writer
     local nbyte = 0
 
     for name, parts in pairs(form) do
-        if is_string(name) then
+        if is_string(name) and is_table(parts) then
             for _, part in ipairs(parts) do
-                -- write delimiter
-                local n, err = writer:write(delimiter)
+                local t = type(part)
+                local n, err
+
+                if VALID_DATATYPE[t] then
+                    n, err = encode_part(ctx, name, {
+                        data = part,
+                    }, encode_part_data)
+                elseif t == 'table' then
+                    if part.header ~= nil and not is_table(part.header) then
+                        -- invalid header field
+                        return nil,
+                               format('header field in %q must be table', name)
+                    elseif part.filename == nil then
+                        if VALID_DATATYPE[type(part.data)] then
+                            n, err = encode_part(ctx, name, part,
+                                                 encode_part_data)
+                        end
+                    elseif not is_string(part.filename) then
+                        -- invalid filename field
+                        return nil, format(
+                                   'filename field in %q must be string', name)
+                    elseif part.file == nil then
+                        -- open file
+                        if part.pathname ~= nil then
+                            if not is_string(part.pathname) then
+                                -- invalid pathname field
+                                return nil, format(
+                                           'pathname field in %q must be string',
+                                           name)
+                            end
+
+                            -- open target file
+                            local tmpfile
+                            tmpfile, err = open(part.pathname)
+                            if not tmpfile then
+                                return nil, format(
+                                           'failed to open file %q for %q: %s',
+                                           part.pathname, name, err)
+                            end
+                            part.file = tmpfile
+                            ctx.tmpfile = tmpfile
+                            n, err = encode_part(ctx, name, part,
+                                                 encode_part_file)
+                            ctx.tmpfile = nil
+                            tmpfile:close()
+                        end
+                    elseif not is_file(part.file) then
+                        -- invalid file field
+                        return nil,
+                               format('file field in %q must be file*', name)
+                    else
+                        n, err = encode_part(ctx, name, part, encode_part_file)
+                    end
+                end
+
                 if err then
                     return nil, err
+                elseif n then
+                    nbyte = nbyte + n
                 end
-                nbyte = nbyte + n
-
-                -- write body-part
-                n, err = encode_body(ctx, name, part)
-                if not n then
-                    return nil, err
-                end
-                nbyte = nbyte + n
-
-                -- write CRLF
-                n, err = writer:write('\r\n')
-                if err then
-                    return nil, err
-                end
-                nbyte = nbyte + n
             end
         end
     end
@@ -358,6 +378,10 @@ local function encode(writer, form, boundary, chunksize)
     }
 
     local ok, res, err = pcall(encode_form, ctx, form)
+    if ctx.tmpfile then
+        ctx.tmpfile:close()
+    end
+
     if not ok then
         return nil, res
     end

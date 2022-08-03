@@ -586,7 +586,7 @@ local function discard_epilogue(ctx)
         if err then
             return false, err
         end
-    until not s
+    until not s or #s == 0
 
     return true
 end

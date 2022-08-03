@@ -18,6 +18,20 @@ function testcase.after_all()
     end
 end
 
+function testcase.is_valid_boundary()
+    -- test that true
+    assert(multipart.is_valid_boundary('foo-bar-baz'))
+
+    -- test that return invalid character error
+    local ok, err = multipart.is_valid_boundary('foo#bar-baz')
+    assert.is_false(ok)
+    assert.match(err, 'invalid character "#" found in boundary')
+
+    -- test that throws an error if boundary is not string
+    err = assert.throws(multipart.is_valid_boundary, {})
+    assert.match(err, 'boundary must be string')
+end
+
 function testcase.encode()
     local file = assert(io.tmpfile())
     file:write('baz file')

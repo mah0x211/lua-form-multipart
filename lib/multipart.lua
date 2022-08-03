@@ -324,6 +324,34 @@ local function encode_form(ctx, form)
     return nbyte + n
 end
 
+--- is_valid_boundary
+--- @param boundary string
+--- @return boolean ok
+--- @return any err
+local function is_valid_boundary(boundary)
+    --
+    -- boundary := 0*69<bchars> bcharsnospace
+    --
+    -- bchars := bcharsnospace / " "
+    --
+    -- bcharsnospace := DIGIT / ALPHA / "'" / "(" / ")" /
+    --                  "+" / "_" / "," / "-" / "." /
+    --                  "/" / ":" / "=" / "?"
+    --
+    if not is_string(boundary) then
+        error('boundary must be string', 2)
+    end
+
+    local pos = find(boundary, '[^0-9a-zA-Z\'()+_,-./:=?]')
+    if pos then
+        -- non bcharsnospace character found
+        return false, format('invalid character %q found in boundary',
+                             sub(boundary, pos, pos))
+
+    end
+    return true
+end
+
 --- encode
 --- @param writer table|userdata
 --- @param form table
@@ -354,15 +382,9 @@ local function encode(writer, form, boundary, chunksize)
     --                  "+" / "_" / "," / "-" / "." /
     --                  "/" / ":" / "=" / "?"
     --
-    if not is_string(boundary) then
-        error('boundary must be string', 2)
-    else
-        local pos = find(boundary, '[^0-9a-zA-Z\'()+_,-./:=?]')
-        if pos then
-            -- non bcharsnospace character found
-            error(format('invalid character %q in boundary',
-                         sub(boundary, pos, pos)), 2)
-        end
+    local ok, err = is_valid_boundary(boundary)
+    if not ok then
+        error(err, 2)
     end
 
     -- verify chunksize
@@ -379,7 +401,8 @@ local function encode(writer, form, boundary, chunksize)
         chunksize = chunksize,
     }
 
-    local ok, res, err = pcall(encode_form, ctx, form)
+    local res
+    ok, res, err = pcall(encode_form, ctx, form)
     if ctx.tmpfile then
         ctx.tmpfile:close()
     end
@@ -786,6 +809,7 @@ local function decode(reader, boundary, filetmpl, maxsize, chunksize)
 end
 
 return {
+    is_valid_boundary = is_valid_boundary,
     encode = encode,
     decode = decode,
 }

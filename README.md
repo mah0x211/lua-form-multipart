@@ -14,18 +14,26 @@ luarocks install form-multipart
 ```
 
 
-## n, err = multipart.encode( writer, form, boundary [, chunksize] )
+## n, err = multipart.encode( writer, form, boundary )
 
 encode a form table to string in `multipart/form-data` format.
 
 **Parameters**
 
-- `writer:table|userdata`: call the `writer:write` method to output a string in `multipart/form-data` format.
+- `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
     ```
     n, err = writer:write( s )
     - n:integer: number of bytes written.
     - err:any: error value.
     - s:string: output string.
+    ```
+    ```
+    n, err = writer:writefile( file, len, offset, part )
+    - n:integer: number of bytes written.
+    - err:any: error value.
+    - len:integer: file size.
+    - offset:integer: file offset at which to begin the writeout.
+    - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 - `form:table`: a form table of the following format.
     ```
@@ -55,7 +63,6 @@ encode a form table to string in `multipart/form-data` format.
     }
     ```
 - `boundary:string`: a boundary string.
-- `chunksize:integer`: number of byte to read from the file. this value must be greater than `0`. (default: `4096`)
 
 **Returns**
 

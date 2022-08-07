@@ -90,6 +90,20 @@ function testcase.encode()
             str = str .. s
             return #s
         end,
+        writefile = function(self, f, len, offset, part)
+            -- write file content
+            f:seek('set', offset)
+            local s, err = f:read(len)
+            if part.is_tmpfile then
+                f:close()
+            end
+
+            if err then
+                return nil, string.format('failed to read file %q in %q: %s',
+                                          part.filename, part.name, err)
+            end
+            return self:write(s)
+        end,
     }, form, 'test_boundary'))
     assert.equal(n, #str)
     for _, part in ipairs({
@@ -179,6 +193,8 @@ function testcase.encode()
     err = assert.throws(multipart.encode, {
         write = function()
         end,
+        writefile = function()
+        end,
     }, true)
     assert.match(err, 'form must be table')
 
@@ -186,15 +202,10 @@ function testcase.encode()
     err = assert.throws(multipart.encode, {
         write = function()
         end,
+        writefile = function()
+        end,
     }, {}, true)
     assert.match(err, 'boundary must be string')
-
-    -- test that throws an error if chunksize argument is invalid
-    err = assert.throws(multipart.encode, {
-        write = function()
-        end,
-    }, {}, 'boundary', 0)
-    assert.match(err, 'chunksize must be uint greater than 0')
 end
 
 function testcase.decode()

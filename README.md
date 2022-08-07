@@ -86,6 +86,19 @@ local n = assert(multipart.encode({
         str = str .. s
         return #s
     end,
+    writefile = function(self, f, len, offset, part)
+        f:seek('set', offset)
+        local s, err = f:read(len)
+        if part.is_tmpfile then
+            f:close()
+        end
+
+        if err then
+            return nil, string.format('failed to read file %q in %q: %s',
+                                          part.filename, part.name, err)
+        end
+        return self:write(s)
+    end,
 }, {
     foo = {
         'string value',

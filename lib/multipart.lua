@@ -117,7 +117,6 @@ local gcfn = require('gcfn')
 --- @return any err
 local function encode_part_file(ctx, name, part)
     local writer = ctx.writer
-    local chunksize = ctx.chunksize
     local file = part.file
     local nbyte = 0
 
@@ -132,22 +131,15 @@ local function encode_part_file(ctx, name, part)
     nbyte = nbyte + n
 
     -- write file content
-    s, err = file:read(chunksize)
-    while s do
-        n, err = writer:write(s)
-        if err then
-            return nil, err
-        end
-        nbyte = nbyte + n
-        s, err = file:read(chunksize)
-    end
-
+    -- if part.is_tmpfile is true, the writer:writefile method must close the
+    -- file argument
+    part.name = name
+    n = assert(file:seek('end'))
+    n, err = writer:writefile(file, n, 0, part)
     if err then
-        return nil, format('failed to read file %q in %q: %s', part.filename,
-                           name, err)
+        return nil, err
     end
-
-    return nbyte
+    return nbyte + n
 end
 
 --- encode_part_data
@@ -246,7 +238,6 @@ local VALID_DATATYPE = {
 --- @return integer|nil nbyte
 --- @return any err
 local function encode_form(ctx, form)
-    local writer = ctx.writer
     local nbyte = 0
 
     for name, parts in pairs(form) do
@@ -292,11 +283,12 @@ local function encode_form(ctx, form)
                                            part.pathname, name, err)
                             end
                             part.file = tmpfile
+                            part.is_tmpfile = true
                             ctx.tmpfile = tmpfile
                             n, err = encode_part(ctx, name, part,
                                                  encode_part_file)
                             ctx.tmpfile = nil
-                            tmpfile:close()
+                            part.is_tmpfile = nil
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field
@@ -317,7 +309,7 @@ local function encode_form(ctx, form)
     end
 
     -- write close-delimiter
-    local n, err = writer:write(ctx.close_delimiter)
+    local n, err = ctx.writer:write(ctx.close_delimiter)
     if err then
         return nil, err
     end
@@ -356,13 +348,13 @@ end
 --- @param writer table|userdata
 --- @param form table
 --- @param boundary string
---- @param chunksize integer
 --- @return integer? nbyte
 --- @return any err
-local function encode(writer, form, boundary, chunksize)
+local function encode(writer, form, boundary)
     -- verify writer
     if not pcall(function()
         assert(is_func(writer.write))
+        assert(is_func(writer.writefile))
     end) then
         error('writer.write must be function', 2)
     end
@@ -387,18 +379,10 @@ local function encode(writer, form, boundary, chunksize)
         error(err, 2)
     end
 
-    -- verify chunksize
-    if chunksize == nil then
-        chunksize = 4096
-    elseif not is_uint(chunksize) or chunksize < 1 then
-        error('chunksize must be uint greater than 0', 2)
-    end
-
     local ctx = {
         writer = writer,
         delimiter = '--' .. boundary .. '\r\n',
         close_delimiter = '--' .. boundary .. '--',
-        chunksize = chunksize,
     }
 
     local res

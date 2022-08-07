@@ -187,7 +187,7 @@ function testcase.encode()
 
     -- test that throws an error if writer argument has no write function
     local err = assert.throws(multipart.encode, 'hello')
-    assert.match(err, 'writer.write must be function')
+    assert.match(err, 'writer.write and writer.writefile must be functions')
 
     -- test that throws an error if form argument is invalid
     err = assert.throws(multipart.encode, {

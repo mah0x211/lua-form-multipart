@@ -356,7 +356,7 @@ local function encode(writer, form, boundary)
         assert(is_func(writer.write))
         assert(is_func(writer.writefile))
     end) then
-        error('writer.write must be function', 2)
+        error('writer.write and writer.writefile must be functions', 2)
     end
 
     -- verify form

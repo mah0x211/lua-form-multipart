@@ -36,6 +36,13 @@ local is_table = isa.table
 local is_func = isa.func
 local mkstemp = require('mkstemp')
 local gcfn = require('gcfn')
+local toerror = require('error').toerror
+local new_error_type = require('error').type.new
+-- constants
+local EENCODE = new_error_type('form.multipart.encode', nil,
+                               'form-multipart encode error')
+local EDECODE = new_error_type('form.multipart.decode', nil,
+                               'form-multipart decode error')
 
 --
 -- 3.3.  LEXICAL TOKENS
@@ -253,8 +260,9 @@ local function encode_form(ctx, form)
                 elseif t == 'table' then
                     if part.header ~= nil and not is_table(part.header) then
                         -- invalid header field
-                        return nil,
-                               format('header field in %q must be table', name)
+                        return nil, EENCODE:new(
+                                   format('header field in %q must be table',
+                                          name))
                     elseif part.filename == nil then
                         if VALID_DATATYPE[type(part.data)] then
                             n, err = encode_part(ctx, name, part,
@@ -262,25 +270,28 @@ local function encode_form(ctx, form)
                         end
                     elseif not is_string(part.filename) then
                         -- invalid filename field
-                        return nil, format(
-                                   'filename field in %q must be string', name)
+                        return nil, EENCODE:new(
+                                   format('filename field in %q must be string',
+                                          name))
                     elseif part.file == nil then
                         -- open file
                         if part.pathname ~= nil then
                             if not is_string(part.pathname) then
                                 -- invalid pathname field
-                                return nil, format(
-                                           'pathname field in %q must be string',
-                                           name)
+                                return nil, EENCODE(
+                                           format(
+                                               'pathname field in %q must be string',
+                                               name))
                             end
 
                             -- open target file
                             local tmpfile
                             tmpfile, err = open(part.pathname)
                             if not tmpfile then
-                                return nil, format(
-                                           'failed to open file %q for %q: %s',
-                                           part.pathname, name, err)
+                                return nil, toerror(
+                                           format(
+                                               'failed to open file %q for %q: %s',
+                                               part.pathname, name, err))
                             end
                             part.file = tmpfile
                             part.is_tmpfile = true
@@ -292,8 +303,8 @@ local function encode_form(ctx, form)
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field
-                        return nil,
-                               format('file field in %q must be file*', name)
+                        return nil, EENCODE(
+                                   format('file field in %q must be file*', name))
                     else
                         n, err = encode_part(ctx, name, part, encode_part_file)
                     end
@@ -392,15 +403,16 @@ local function encode(writer, form, boundary)
     end
 
     if not ok then
-        return nil, res
+        return nil, toerror(res)
+    elseif not res then
+        return nil, toerror(err)
     end
-
-    return res, err
+    return res
 end
 
 --- read_chunk
 --- @param ctx table
---- @return string str
+--- @return string|nil str
 --- @return any err
 local function read_chunk(ctx)
     -- read next chunk
@@ -408,7 +420,7 @@ local function read_chunk(ctx)
     if err then
         return nil, err
     elseif not str or #str == 0 then
-        return nil, 'insufficient multipart/form-data'
+        return nil, EDECODE:new('insufficient multipart/form-data')
     end
     return str
 end
@@ -430,7 +442,7 @@ local function skip_terminator(ctx)
         end
 
         if maxsize and maxsize - #buf <= 0 then
-            return false, 'multipart body too large'
+            return false, EDECODE:new('multipart body too large')
         end
 
         -- read next chunk
@@ -503,7 +515,7 @@ local function decode_body(ctx, writer)
         end
 
         if maxsize and maxsize - #buf <= 0 then
-            return false, 'multipart body too large'
+            return false, EDECODE:new('multipart body too large')
         end
 
         -- read next chunk
@@ -544,7 +556,7 @@ local function decode_header(ctx)
             -- extract header
             local k, v = match(line, '([^: \t]+)%s*:%s*(.+)')
             if not k then
-                return nil, format('invalid header %q', line)
+                return nil, EDECODE:new(format('invalid header %q', line))
             end
 
             k = lower(k)
@@ -619,7 +631,8 @@ local function discard_preamble(ctx)
                 ctx.buf = sub(buf, tail + 1)
                 return true
             elseif line == close_delimiter then
-                return false, 'end of boundary found, but boundary not started'
+                return false, EDECODE:new(
+                           'end of boundary found, but boundary not started')
             end
 
             buf = sub(buf, tail + 1)
@@ -727,7 +740,7 @@ local function decode(reader, boundary, filetmpl, maxsize, chunksize)
         local writer = function(s)
             nwrite = nwrite + #s
             if maxsize and maxsize - nwrite < 0 then
-                return false, 'multipart body too large'
+                return false, EDECODE:new('multipart body too large')
             elseif part_data then
                 part_data = part_data .. s
                 return true
@@ -741,6 +754,9 @@ local function decode(reader, boundary, filetmpl, maxsize, chunksize)
             part, err = decode_header(ctx)
             if not part then
                 return false, err
+            elseif not part.name then
+                return false, EDECODE:new(
+                           'Content-Disposition header does not contain a name parameter')
             end
 
             local again
@@ -784,11 +800,13 @@ local function decode(reader, boundary, filetmpl, maxsize, chunksize)
     end)
 
     -- failed to parse
-    if not ok or not res then
+    if not ok then
         discard_form(form)
-        return nil, err or res
+        return nil, toerror(res)
+    elseif not res then
+        discard_form(form)
+        return nil, toerror(err)
     end
-
     return form
 end
 

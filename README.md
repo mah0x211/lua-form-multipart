@@ -13,6 +13,10 @@ encode/decode the multipart/form-data format.
 luarocks install form-multipart
 ```
 
+## Error Handling
+
+the following functions return the `error` object created by https://github.com/mah0x211/lua-error module.
+
 
 ## n, err = multipart.encode( writer, form, boundary )
 

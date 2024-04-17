@@ -63,6 +63,7 @@ encode a form table to string in `multipart/form-data` format.
     n, err = writer:writefile( file, len, offset, part )
     - n:integer: number of bytes written.
     - err:any: error value.
+    - file:file*: file that contains the file data.
     - len:integer: file size.
     - offset:integer: file offset at which to begin the writeout.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
@@ -174,21 +175,22 @@ Content-Disposition: form-data; name="qux"\r\n
 
 ## form, err = multipart.decode( reader, boundary [, filetmpl [, maxsize [, chunksize]]] )
 
-decode `multipart/form-data` format string.
+decode a string in `multipart/form-data` format.
 
 **Parameters**
 
-- `reader:table|userdata`: reads a string in `multipart/form-data` format with the `reader:read` method.
-    ```
-    s, err = reader:read( n )
-    - n:integer: number of bytes read.
-    - s:string: a string in multipart/form-data format.
-    - err:any: error value.
-    ```
+- `reader:string|table|userdata`: a string in `multipart/form-data` format.
+    -  if the `reader` parameter is not string, it must have the `reader.read` method.
+        ```
+        s, err = reader:read( n )
+        - s:string: a string in multipart/form-data format.
+        - err:any: error value.
+        - n:integer: number of bytes read.
+        ```
 - `boundary:string`: a boundary string.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxsize:integer`: limit the maximum size per file.
-- `chunksize:integer`: number of byte to read from the `reader.read` method. this value must be greater than `0`. (default: `4096`)
+- `chunksize:integer`: if the `reader` parameter is not string, number of byte to read from the `reader.read` method. this value must be greater than `0`. (default: `4096`)
 
 **Returns**
 

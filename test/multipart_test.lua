@@ -362,6 +362,109 @@ function testcase.decode()
     }, '\r\n')
 
     -- test that decode a string to form table
+    local form = assert(multipart.decode(str, 'test_boundary'))
+    assert.contains(form.foo[1], {
+        name = 'foo',
+        header = {
+            ['content-disposition'] = {
+                'form-data; name="foo"; filename="bar.txt"',
+            },
+            ['x-example'] = {
+                'example header1',
+                'example header2',
+            },
+        },
+        filename = 'bar.txt',
+    })
+    assert.equal(form.foo[1].file:read('*a'), 'bar file')
+    assert.equal(form.foo[2], {
+        name = 'foo',
+        header = {
+            ['content-disposition'] = {
+                'form-data; name="foo"',
+            },
+        },
+        data = 'hello world',
+    })
+    assert.contains(form.foo[3], {
+        name = 'foo',
+        header = {
+            ['content-disposition'] = {
+                'form-data; name="foo"; filename="baz.txt"',
+            },
+        },
+        filename = 'baz.txt',
+    })
+    assert.equal(form.foo[3].file:read('*a'), 'baz file')
+    assert.equal(form.qux, {
+        {
+            name = 'qux',
+            header = {
+                ['content-disposition'] = {
+                    'form-data; name="qux"',
+                },
+            },
+            data = 'qux',
+        },
+        {
+            name = 'qux',
+            header = {
+                ['content-disposition'] = {
+                    'form-data; name="qux"',
+                },
+            },
+            data = '',
+        },
+    })
+
+    -- test that throws an error if reader argument has no read function
+    local err = assert.throws(multipart.decode, {
+        'hello',
+    })
+    assert.match(err, 'reader must be string')
+
+    -- test that throws an error if boundary argument is invalid
+    err = assert.throws(multipart.decode, 'hello', {})
+    assert.match(err, 'boundary must be string')
+
+    -- test that throws an error if filetmpl argument is invalid
+    err = assert.throws(multipart.decode, 'hello', 'boundary', {})
+    assert.match(err, 'filetmpl must be string')
+
+    -- test that throws an error if maxsize argument is invalid
+    err = assert.throws(multipart.decode, 'hello', 'boundary', '/tmp/test_file',
+                        {})
+    assert.match(err, 'maxsize must be uint')
+end
+
+function testcase.decode_with_reader()
+    local str = table.concat({
+        '--test_boundary',
+        'X-Example: example header1',
+        'X-Example: example header2',
+        'Content-Disposition: form-data; name="foo"; filename="bar.txt"',
+        '',
+        'bar file',
+        '--test_boundary',
+        'Content-Disposition: form-data; name="foo"',
+        '',
+        'hello world',
+        '--test_boundary',
+        'Content-Disposition: form-data; name="foo"; filename="baz.txt"',
+        '',
+        'baz file',
+        '--test_boundary',
+        'Content-Disposition: form-data; name="qux"',
+        '',
+        'qux',
+        '--test_boundary',
+        'Content-Disposition: form-data; name="qux"',
+        '',
+        '',
+        '--test_boundary--',
+    }, '\r\n')
+
+    -- test that decode a string to form table
     local form = assert(multipart.decode({
         read = function(_, n)
             if #str > 0 then
@@ -426,35 +529,14 @@ function testcase.decode()
     })
 
     -- test that throws an error if reader argument has no read function
-    local err = assert.throws(multipart.decode, 'hello')
-    assert.match(err, 'reader.read must be function')
-
-    -- test that throws an error if boundary argument is invalid
-    err = assert.throws(multipart.decode, {
-        read = function()
-        end,
-    }, {})
-    assert.match(err, 'boundary must be string')
-
-    -- test that throws an error if filetmpl argument is invalid
-    err = assert.throws(multipart.decode, {
-        read = function()
-        end,
-    }, 'boundary', {})
-    assert.match(err, 'filetmpl must be string')
-
-    -- test that throws an error if maxsize argument is invalid
-    err = assert.throws(multipart.decode, {
-        read = function()
-        end,
-    }, 'boundary', '/tmp/test_file', {})
-    assert.match(err, 'maxsize must be uint')
+    local err = assert.throws(multipart.decode, {})
+    assert.match(err, 'reader must be string or it must have read method')
 
     -- test that throws an error if chunksize argument is invalid
     err = assert.throws(multipart.decode, {
         read = function()
         end,
     }, 'boundary', '/tmp/test_file', 0, 0)
-    assert.match(err, 'chunksize must be uint greater than 0')
+    assert.match(err, 'chunksize must be positive integer')
 end
 

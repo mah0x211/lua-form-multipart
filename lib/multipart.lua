@@ -36,6 +36,7 @@ local open = io.open
 local is = require('lauxhlib.is')
 local is_file = is.file
 local is_uint = is.uint
+local is_pint = is.pint
 local mkstemp = require('mkstemp')
 local gcfn = require('gcfn')
 local toerror = require('error').toerror
@@ -458,14 +459,23 @@ end
 
 --- read_chunk
 --- @param ctx table
---- @return string|nil str
+--- @return string? str
 --- @return any err
 local function read_chunk(ctx)
-    -- read next chunk
-    local str, err = ctx.reader:read(ctx.chunksize)
-    if err then
-        return nil, err
-    elseif not str or #str == 0 then
+    local str
+    if ctx.reader then
+        -- read next chunk
+        local err
+        str, err = ctx.reader:read(ctx.chunksize)
+        if err then
+            return nil, err
+        end
+    elseif ctx.chunk then
+        -- consume chunk
+        str, ctx.chunk = ctx.chunk, nil
+    end
+
+    if not str or #str == 0 then
         return nil, EDECODE:new('insufficient multipart/form-data')
     end
     return str
@@ -505,7 +515,7 @@ end
 --- @param writer function
 --- @return boolean ok
 --- @return any err
---- @return boolean|nil again
+--- @return boolean? again
 local function decode_body(ctx, writer)
     local buf = ctx.buf
     local delimiter = ctx.delimiter
@@ -575,7 +585,7 @@ end
 
 --- decode_header
 --- @param ctx any
---- @return table|nil part
+--- @return table? part
 --- @return any err
 local function decode_header(ctx)
     local buf = ctx.buf
@@ -642,10 +652,14 @@ end
 ---@return boolean ok
 ---@return any err
 local function discard_epilogue(ctx)
+    ctx.buf = nil
+    if not ctx.reader then
+        ctx.chunk = nil
+        return true
+    end
+
     local reader = ctx.reader
     local chunksize = ctx.chunksize
-
-    ctx.buf = nil
     repeat
         local s, err = reader:read(chunksize)
         if err then
@@ -730,11 +744,19 @@ end
 --- @return table? form
 --- @return any err
 local function decode(reader, boundary, filetmpl, maxsize, chunksize)
+    local chunk
     -- verify reader
-    if not pcall(function()
+    if type(reader) == 'string' then
+        chunk = reader
+        reader = nil
+    elseif not pcall(function()
         assert(type(reader.read) == 'function')
     end) then
-        error('reader.read must be function', 2)
+        error('reader must be string or it must have read method', 2)
+    elseif chunksize == nil then
+        chunksize = 4096
+    elseif not is_pint(chunksize) then
+        error('chunksize must be positive integer', 2)
     end
 
     -- verify boundary
@@ -756,14 +778,8 @@ local function decode(reader, boundary, filetmpl, maxsize, chunksize)
         error('maxsize must be uint', 2)
     end
 
-    -- verify chunksize
-    if chunksize == nil then
-        chunksize = 4096
-    elseif not is_uint(chunksize) or chunksize < 1 then
-        error('chunksize must be uint greater than 0', 2)
-    end
-
     local ctx = {
+        chunk = chunk,
         reader = reader,
         delimiter = '--' .. boundary,
         close_delimiter = '--' .. boundary .. '--',

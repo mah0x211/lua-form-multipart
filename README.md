@@ -18,27 +18,12 @@ luarocks install form-multipart
 the following functions return the `error` object created by https://github.com/mah0x211/lua-error module.
 
 
-## n, err = multipart.encode( writer, form, boundary )
+## res, err = multipart.encode( form, boundary [, writer] )
 
 encode a form table to string in `multipart/form-data` format.
 
 **Parameters**
 
-- `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
-    ```
-    n, err = writer:write( s )
-    - n:integer: number of bytes written.
-    - err:any: error value.
-    - s:string: output string.
-    ```
-    ```
-    n, err = writer:writefile( file, len, offset, part )
-    - n:integer: number of bytes written.
-    - err:any: error value.
-    - len:integer: file size.
-    - offset:integer: file offset at which to begin the writeout.
-    - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
-    ```
 - `form:table`: a form table of the following format.
     ```
     {
@@ -67,10 +52,28 @@ encode a form table to string in `multipart/form-data` format.
     }
     ```
 - `boundary:string`: a boundary string.
+- `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
+    ```
+    n, err = writer:write( s )
+    - n:integer: number of bytes written.
+    - err:any: error value.
+    - s:string: output string.
+    ```
+    ```
+    n, err = writer:writefile( file, len, offset, part )
+    - n:integer: number of bytes written.
+    - err:any: error value.
+    - file:file*: file that contains the file data.
+    - len:integer: file size.
+    - offset:integer: file offset at which to begin the writeout.
+    - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
+    ```
 
 **Returns**
 
-- `n:integer`: total number of bytes written.
+- `res:string|integer`: a string in `multipart/form-data` format, or number of bytes written.
+  - if the `writer` parameter is not specified, it returns a string in `multipart/form-data` format.
+  - otherwise, it returns the number of bytes written to the `writer:write` and `writer:writefile` methods.
 - `err:any`: error value.
 
 
@@ -86,24 +89,6 @@ f:write('bar')
 f:seek('set') -- the file position indicator must be set manually
 local str = ''
 local n = assert(multipart.encode({
-    write = function(_, s)
-        str = str .. s
-        return #s
-    end,
-    writefile = function(self, f, len, offset, part)
-        f:seek('set', offset)
-        local s, err = f:read(len)
-        if part.is_tmpfile then
-            f:close()
-        end
-
-        if err then
-            return nil, string.format('failed to read file %q in %q: %s',
-                                          part.filename, part.name, err)
-        end
-        return self:write(s)
-    end,
-}, {
     foo = {
         'string value',
         {
@@ -132,7 +117,25 @@ local n = assert(multipart.encode({
         },
         123,
     },
-}, 'example_boundary'))
+}, 'example_boundary', {
+    write = function(_, s)
+        str = str .. s
+        return #s
+    end,
+    writefile = function(self, f, len, offset, part)
+        f:seek('set', offset)
+        local s, err = f:read(len)
+        if part.is_tmpfile then
+            f:close()
+        end
+
+        if err then
+            return nil, string.format('failed to read file %q in %q: %s',
+                                          part.filename, part.name, err)
+        end
+        return self:write(s)
+    end,
+}))
 assert(n == #str)
 print(string.format(string.gsub(str, '[\r\n]', {
     ['\r'] = '\\r',
@@ -172,21 +175,22 @@ Content-Disposition: form-data; name="qux"\r\n
 
 ## form, err = multipart.decode( reader, boundary [, filetmpl [, maxsize [, chunksize]]] )
 
-decode `multipart/form-data` format string.
+decode a string in `multipart/form-data` format.
 
 **Parameters**
 
-- `reader:table|userdata`: reads a string in `multipart/form-data` format with the `reader:read` method.
-    ```
-    s, err = reader:read( n )
-    - n:integer: number of bytes read.
-    - s:string: a string in multipart/form-data format.
-    - err:any: error value.
-    ```
+- `reader:string|table|userdata`: a string in `multipart/form-data` format.
+    -  if the `reader` parameter is not string, it must have the `reader.read` method.
+        ```
+        s, err = reader:read( n )
+        - s:string: a string in multipart/form-data format.
+        - err:any: error value.
+        - n:integer: number of bytes read.
+        ```
 - `boundary:string`: a boundary string.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxsize:integer`: limit the maximum size per file.
-- `chunksize:integer`: number of byte to read from the `reader.read` method. this value must be greater than `0`. (default: `4096`)
+- `chunksize:integer`: if the `reader` parameter is not string, number of byte to read from the `reader.read` method. this value must be greater than `0`. (default: `4096`)
 
 **Returns**
 

@@ -12,8 +12,8 @@ description = {
 dependencies = {
     "lua >= 5.1",
     "error >= 0.8.0",
-    "isa >= 0.3.0",
     "gcfn >= 0.3.0",
+    "lauxhlib >= 0.6.0",
     "mkstemp >= 0.2.0",
 }
 build = {

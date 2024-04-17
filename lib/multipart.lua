@@ -33,12 +33,9 @@ local lower = string.lower
 local concat = table.concat
 local remove = os.remove
 local open = io.open
-local isa = require('isa')
-local is_string = isa.string
-local is_file = isa.file
-local is_uint = isa.uint
-local is_table = isa.table
-local is_func = isa.func
+local is = require('lauxhlib.is')
+local is_file = is.file
+local is_uint = is.uint
 local mkstemp = require('mkstemp')
 local gcfn = require('gcfn')
 local toerror = require('error').toerror
@@ -173,7 +170,7 @@ local function encode_part_data(ctx, name, part)
     end
     nbyte = nbyte + n
 
-    if not is_string(data) then
+    if type(data) ~= 'string' then
         data = tostring(data)
     end
 
@@ -209,7 +206,7 @@ local function encode_part(ctx, name, part, encode_body)
         -- add headers
         for key, vals in pairs(part.header) do
             -- write only values with the valid key
-            if is_table(vals) and is_string(key) and #key > 0 and
+            if type(vals) == 'table' and type(key) == 'string' and #key > 0 and
                 not find(key, '%s') then
                 for _, v in ipairs(vals) do
                     local s = format('%s: %s\r\n', key, tostring(v))
@@ -253,7 +250,7 @@ local function encode_form(ctx, form)
     local nbyte = 0
 
     for name, parts in pairs(form) do
-        if is_string(name) and is_table(parts) then
+        if type(name) == 'string' and type(parts) == 'table' then
             for _, part in ipairs(parts) do
                 local t = type(part)
                 local n, err
@@ -263,7 +260,7 @@ local function encode_form(ctx, form)
                         data = part,
                     }, encode_part_data)
                 elseif t == 'table' then
-                    if part.header ~= nil and not is_table(part.header) then
+                    if part.header ~= nil and type(part.header) ~= 'table' then
                         -- invalid header field
                         return nil, EENCODE:new(
                                    format('header field in %q must be table',
@@ -273,7 +270,7 @@ local function encode_form(ctx, form)
                             n, err = encode_part(ctx, name, part,
                                                  encode_part_data)
                         end
-                    elseif not is_string(part.filename) then
+                    elseif type(part.filename) ~= 'string' then
                         -- invalid filename field
                         return nil, EENCODE:new(
                                    format('filename field in %q must be string',
@@ -281,7 +278,7 @@ local function encode_form(ctx, form)
                     elseif part.file == nil then
                         -- open file
                         if part.pathname ~= nil then
-                            if not is_string(part.pathname) then
+                            if type(part.pathname) ~= 'string' then
                                 -- invalid pathname field
                                 return nil, EENCODE(
                                            format(
@@ -346,7 +343,7 @@ local function is_valid_boundary(boundary)
     --                  "+" / "_" / "," / "-" / "." /
     --                  "/" / ":" / "=" / "?"
     --
-    if not is_string(boundary) then
+    if type(boundary) ~= 'string' then
         error('boundary must be string', 2)
     end
 
@@ -406,7 +403,7 @@ end
 --- @return any err
 local function encode(form, boundary, writer)
     -- verify form
-    if not is_table(form) then
+    if type(form) ~= 'table' then
         error('form must be table', 2)
     end
 
@@ -430,8 +427,8 @@ local function encode(form, boundary, writer)
         writer = DefaultWriter
         writer.multipart = {}
     elseif not pcall(function()
-        assert(is_func(writer.write))
-        assert(is_func(writer.writefile))
+        assert(type(writer.write) == 'function')
+        assert(type(writer.writefile) == 'function')
     end) then
         error('writer.write and writer.writefile must be functions', 2)
     end
@@ -735,20 +732,20 @@ end
 local function decode(reader, boundary, filetmpl, maxsize, chunksize)
     -- verify reader
     if not pcall(function()
-        assert(is_func(reader.read))
+        assert(type(reader.read) == 'function')
     end) then
         error('reader.read must be function', 2)
     end
 
     -- verify boundary
-    if not is_string(boundary) then
+    if type(boundary) ~= 'string' then
         error('boundary must be string', 2)
     end
 
     -- verify filetmpl
     if filetmpl == nil then
         filetmpl = '/tmp/lua_form_multipart_XXXXXX'
-    elseif not is_string(filetmpl) then
+    elseif type(filetmpl) ~= 'string' then
         error('filetmpl must be string', 2)
     else
         filetmpl = filetmpl .. '_XXXXXX'

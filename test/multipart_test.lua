@@ -1,5 +1,6 @@
 require('luacov')
 local testcase = require('testcase')
+local assert = require('assert')
 local mkstemp = require('mkstemp')
 local multipart = require('form.multipart')
 
@@ -84,8 +85,151 @@ function testcase.encode()
 
     -- test that encode a form table to string
     file:seek('set')
+    local str, err = multipart.encode(form, 'test_boundary')
+    assert.is_nil(err)
+    assert.is_string(str)
+    for _, part in ipairs({
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="foo"',
+            '',
+            'string value',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'X-Example: example header1',
+            'X-Example: example header2',
+            'Content-Disposition: form-data; name="foo"; filename="bar.txt"',
+            '',
+            'bar file',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="foo"',
+            '',
+            'true',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="foo"',
+            '',
+            'hello world',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="foo"; filename="baz.txt"',
+            '',
+            'baz file',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="qux"',
+            '',
+            '123',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="qux"',
+            '',
+            'qux',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="qux"',
+            '',
+            'false',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary',
+            'Content-Disposition: form-data; name="qux"',
+            '',
+            '',
+            '',
+        }, '\r\n'),
+        table.concat({
+            '--test_boundary--',
+        }, '\r\n'),
+    }) do
+        local head, tail = assert(string.find(str, part, nil, true))
+        if head == 1 then
+            str = string.sub(str, tail + 1)
+        else
+            str = string.sub(str, 1, head - 1) .. string.sub(str, tail + 1)
+        end
+    end
+    assert.equal(#str, 0)
+
+    -- test that throws an error if writer argument has no write function
+    err = assert.throws(multipart.encode, 'hello')
+    assert.match(err, 'form must be table')
+
+    -- test that throws an error if boundary argument is invalid
+    err = assert.throws(multipart.encode, {}, true)
+    assert.match(err, 'boundary must be string')
+end
+
+function testcase.encode_with_writer()
+    local file = assert(io.tmpfile())
+    file:write('baz file')
+    file:seek('set')
+
+    local form = {
+        foo = {
+            'string value',
+            {
+                header = {
+                    ['X-Example'] = {
+                        'example header1',
+                        'example header2',
+                    },
+                },
+                filename = 'bar.txt',
+                pathname = PATHNAME_BAR,
+                data = 'if the filename is defined, this data will be ignored',
+            },
+            true,
+            {
+                header = {
+                    ['this-header-is-ignored '] = {
+                        'invalid key',
+                    },
+                },
+                data = 'hello world',
+            },
+            {
+                filename = 'baz.txt',
+                file = file,
+                pathname = PATHNAME_BAR, -- if the file is defined, pathname field will be ignored',
+                data = 'if the filename is defined, data field will be ignored',
+            },
+        },
+        qux = {
+            123,
+            {
+                data = 'qux',
+            },
+            {
+                -- empty data
+            },
+            false,
+            {
+                data = '',
+            },
+        },
+    }
+
+    -- test that encode a form table to string
+    file:seek('set')
     local str = ''
-    local n = assert(multipart.encode({
+    local n = assert(multipart.encode(form, 'test_boundary', {
         write = function(_, s)
             str = str .. s
             return #s
@@ -104,7 +248,7 @@ function testcase.encode()
             end
             return self:write(s)
         end,
-    }, form, 'test_boundary'))
+    }))
     assert.equal(n, #str)
     for _, part in ipairs({
         table.concat({
@@ -186,26 +330,8 @@ function testcase.encode()
     assert.equal(#str, 0)
 
     -- test that throws an error if writer argument has no write function
-    local err = assert.throws(multipart.encode, 'hello')
+    local err = assert.throws(multipart.encode, {}, '--test_boundary--', {})
     assert.match(err, 'writer.write and writer.writefile must be functions')
-
-    -- test that throws an error if form argument is invalid
-    err = assert.throws(multipart.encode, {
-        write = function()
-        end,
-        writefile = function()
-        end,
-    }, true)
-    assert.match(err, 'form must be table')
-
-    -- test that throws an error if boundary argument is invalid
-    err = assert.throws(multipart.encode, {
-        write = function()
-        end,
-        writefile = function()
-        end,
-    }, {}, true)
-    assert.match(err, 'boundary must be string')
 end
 
 function testcase.decode()

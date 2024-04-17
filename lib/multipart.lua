@@ -19,14 +19,19 @@
 -- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 -- THE SOFTWARE.
 --
+local ipairs = ipairs
+local pairs = pairs
+local pcall = pcall
+local tostring = tostring
+local type = type
 local find = string.find
 local format = string.format
 local sub = string.sub
 local match = string.match
 local gmatch = string.gmatch
 local lower = string.lower
+local concat = table.concat
 local remove = os.remove
-local pcall = pcall
 local open = io.open
 local isa = require('isa')
 local is_string = isa.string
@@ -120,7 +125,7 @@ local EDECODE = new_error_type('form.multipart.decode', nil,
 --- @param ctx table
 --- @param name string
 --- @param part table
---- @return integer|nil nbyte
+--- @return integer? nbyte
 --- @return any err
 local function encode_part_file(ctx, name, part)
     local writer = ctx.writer
@@ -153,7 +158,7 @@ end
 --- @param ctx table
 --- @param name string
 --- @param part table
---- @return integer|nil nbyte
+--- @return integer? nbyte
 --- @return any err
 local function encode_part_data(ctx, name, part)
     local writer = ctx.writer
@@ -185,7 +190,7 @@ end
 --- @param name string
 --- @param part table
 --- @param encode_body function
---- @return integer|nil nbyte
+--- @return integer? nbyte
 --- @return any err
 local function encode_part(ctx, name, part, encode_body)
     local delimiter = ctx.delimiter
@@ -242,7 +247,7 @@ local VALID_DATATYPE = {
 --- encode_form
 --- @param ctx table
 --- @param form table
---- @return integer|nil nbyte
+--- @return integer? nbyte
 --- @return any err
 local function encode_form(ctx, form)
     local nbyte = 0
@@ -355,21 +360,51 @@ local function is_valid_boundary(boundary)
     return true
 end
 
+--- @class form.multipart.writer
+--- @field write fun(self, s:string):(n:integer?,err:any)
+--- @field writefile fun(self, file:file*, len:integer, offset:integer, part:table):(n:integer?,err:any)
+
+--- @class form.multipart.default_writer : form.multipart.writer
+--- @field multipart? string[]
+local DefaultWriter = {
+    write = function(self, s)
+        self.multipart[#self.multipart + 1] = s
+        return #s, nil
+    end,
+    writefile = function(self, file, len, offset, part)
+        -- write file content
+        file:seek('set', offset)
+        local s, err = file:read(len)
+        if part.is_tmpfile then
+            file:close()
+        end
+
+        if err then
+            return nil, format('failed to read file %q in %q: %s',
+                               part.filename, part.name, err)
+        end
+        return self:write(s)
+    end,
+}
+
+--- reset_default_writer
+--- @param writer form.multipart.writer
+--- @return string[]? multipart
+local function reset_default_writer(writer)
+    if writer == DefaultWriter and DefaultWriter.multipart then
+        local multipart = DefaultWriter.multipart
+        DefaultWriter.multipart = nil
+        return multipart
+    end
+end
+
 --- encode
---- @param writer table|userdata
 --- @param form table
 --- @param boundary string
---- @return integer? nbyte
+--- @param writer? form.multipart.writer
+--- @return integer|string? res
 --- @return any err
-local function encode(writer, form, boundary)
-    -- verify writer
-    if not pcall(function()
-        assert(is_func(writer.write))
-        assert(is_func(writer.writefile))
-    end) then
-        error('writer.write and writer.writefile must be functions', 2)
-    end
-
+local function encode(form, boundary, writer)
     -- verify form
     if not is_table(form) then
         error('form must be table', 2)
@@ -390,6 +425,17 @@ local function encode(writer, form, boundary)
         error(err, 2)
     end
 
+    -- verify writer
+    if writer == nil then
+        writer = DefaultWriter
+        writer.multipart = {}
+    elseif not pcall(function()
+        assert(is_func(writer.write))
+        assert(is_func(writer.writefile))
+    end) then
+        error('writer.write and writer.writefile must be functions', 2)
+    end
+
     local ctx = {
         writer = writer,
         delimiter = '--' .. boundary .. '\r\n',
@@ -402,10 +448,13 @@ local function encode(writer, form, boundary)
         ctx.tmpfile:close()
     end
 
+    local multipart = reset_default_writer(writer)
     if not ok then
         return nil, toerror(res)
     elseif not res then
         return nil, toerror(err)
+    elseif multipart then
+        return concat(multipart, '')
     end
     return res
 end

@@ -173,16 +173,16 @@ Content-Disposition: form-data; name="qux"\r\n
 ```
 
 
-## form, err = multipart.decode( reader, boundary [, filetmpl [, maxsize [, chunksize]]] )
+## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxsize [, chunksize]]] )
 
 decode a string in `multipart/form-data` format.
 
 **Parameters**
 
-- `reader:string|table|userdata`: a string in `multipart/form-data` format.
-    -  if the `reader` parameter is not string, it must have the `reader.read` method.
+- `chunk:string|table|userdata`: a string in `multipart/form-data` format.
+    -  if the `chunk` parameter is not string, it must have the `chunk.read` method.
         ```
-        s, err = reader:read( n )
+        s, err = chunk:read( n )
         - s:string: a string in multipart/form-data format.
         - err:any: error value.
         - n:integer: number of bytes read.
@@ -190,7 +190,7 @@ decode a string in `multipart/form-data` format.
 - `boundary:string`: a boundary string.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxsize:integer`: limit the maximum size per file.
-- `chunksize:integer`: if the `reader` parameter is not string, number of byte to read from the `reader.read` method. this value must be greater than `0`. (default: `4096`)
+- `chunksize:integer`: if the `chunk` parameter is not string, number of byte to read from the `chunk.read` method. this value must be greater than `0`. (default: `4096`)
 
 **Returns**
 

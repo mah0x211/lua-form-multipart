@@ -417,11 +417,11 @@ function testcase.decode()
         },
     })
 
-    -- test that throws an error if reader argument has no read function
+    -- test that throws an error if chunk argument has no read function
     local err = assert.throws(multipart.decode, {
         'hello',
     })
-    assert.match(err, 'reader must be string')
+    assert.match(err, 'chunk must be string')
 
     -- test that throws an error if boundary argument is invalid
     err = assert.throws(multipart.decode, 'hello', {})
@@ -528,9 +528,9 @@ function testcase.decode_with_reader()
         },
     })
 
-    -- test that throws an error if reader argument has no read function
+    -- test that throws an error if chunk argument has no read function
     local err = assert.throws(multipart.decode, {})
-    assert.match(err, 'reader must be string or it must have read method')
+    assert.match(err, 'chunk must be string or it must have read method')
 
     -- test that throws an error if chunksize argument is invalid
     err = assert.throws(multipart.decode, {

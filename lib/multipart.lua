@@ -736,23 +736,22 @@ local function gc_discard_form_file(pathname)
 end
 
 --- decode
---- @param reader table|userdata
+--- @param chunk string|table|userdata
 --- @param boundary string
 --- @param filetmpl string
 --- @param maxsize integer
 --- @param chunksize integer
 --- @return table? form
 --- @return any err
-local function decode(reader, boundary, filetmpl, maxsize, chunksize)
-    local chunk
-    -- verify reader
-    if type(reader) == 'string' then
-        chunk = reader
+local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
+    local reader = chunk
+    -- verify chunk
+    if type(chunk) == 'string' then
         reader = nil
     elseif not pcall(function()
         assert(type(reader.read) == 'function')
     end) then
-        error('reader must be string or it must have read method', 2)
+        error('chunk must be string or it must have read method', 2)
     elseif chunksize == nil then
         chunksize = 4096
     elseif not is_pint(chunksize) then

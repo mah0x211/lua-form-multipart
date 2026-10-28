@@ -64,12 +64,18 @@ encode a form table to string in `multipart/form-data` format.
     - n:integer: number of bytes written.
     - err:any: error value.
     - file:file*: file that contains the file data.
-    - len:integer: file size.
+    - len:integer: number of bytes from the current file position to the end of the file.
     - offset:integer: file offset at which to begin the writeout.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 
 Files with zero bytes are encoded as empty file parts.
+Files are encoded from their current position to the end of the file. Seek to
+position zero before calling `encode` to include the whole file. The encoder
+restores the starting position after determining the remaining length. Custom
+writers receive that position as `offset` and the remaining length as `len`;
+they must honor these arguments and position the file as needed. If no bytes
+remain, the file part has an empty body.
 
 **Returns**
 

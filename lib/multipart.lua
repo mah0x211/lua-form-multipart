@@ -144,8 +144,13 @@ local function encode_part_file(ctx, name, part)
     -- if part.is_tmpfile is true, the writer:writefile method must close the
     -- file argument
     part.name = name
-    n = assert(file:seek('end'))
-    n, err = writer:writefile(file, n, 0, part)
+    local offset = assert(file:seek())
+    local len = assert(file:seek('end')) - offset
+    if len < 0 then
+        len = 0
+    end
+    assert(file:seek('set', offset))
+    n, err = writer:writefile(file, len, offset, part)
     if err then
         return nil, err
     end
@@ -369,9 +374,8 @@ local DefaultWriter = {
         self.multipart[#self.multipart + 1] = s
         return #s, nil
     end,
-    writefile = function(self, file, len, offset, part)
+    writefile = function(self, file, len, _, part)
         -- write file content
-        file:seek('set', offset)
         local s = ''
         local err
         if len > 0 then

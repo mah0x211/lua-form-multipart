@@ -368,40 +368,40 @@ end
 --- @field writefile fun(self, file:file*, len:integer, offset:integer, part:table):(n:integer?,err:any)
 
 --- @class form.multipart.default_writer : form.multipart.writer
---- @field multipart? string[]
-local DefaultWriter = {
-    write = function(self, s)
-        self.multipart[#self.multipart + 1] = s
-        return #s, nil
-    end,
-    writefile = function(self, file, len, _, part)
-        -- write file content
-        local s = ''
-        local err
-        if len > 0 then
-            s, err = file:read(len)
-        end
-        if part.is_tmpfile then
-            file:close()
-        end
+--- @field multipart string[]
 
-        if err then
-            return nil, format('failed to read file %q in %q: %s',
-                               part.filename, part.name, err)
-        end
-        return self:write(s)
-    end,
-}
+--- default_write
+--- @param self form.multipart.default_writer
+--- @param s string
+--- @return integer n
+local function default_write(self, s)
+    self.multipart[#self.multipart + 1] = s
+    return #s, nil
+end
 
---- reset_default_writer
---- @param writer form.multipart.writer
---- @return string[]? multipart
-local function reset_default_writer(writer)
-    if writer == DefaultWriter and DefaultWriter.multipart then
-        local multipart = DefaultWriter.multipart
-        DefaultWriter.multipart = nil
-        return multipart
+--- default_writefile
+--- @param self form.multipart.default_writer
+--- @param file file*
+--- @param len integer
+--- @param _ integer
+--- @param part table
+--- @return integer? n
+--- @return any err
+local function default_writefile(self, file, len, _, part)
+    local s = ''
+    local err
+    if len > 0 then
+        s, err = file:read(len)
     end
+    if part.is_tmpfile then
+        file:close()
+    end
+
+    if err then
+        return nil, format('failed to read file %q in %q: %s',
+                           part.filename, part.name, err)
+    end
+    return self:write(s)
 end
 
 --- encode
@@ -432,9 +432,14 @@ local function encode(form, boundary, writer)
     end
 
     -- verify writer
+    local multipart
     if writer == nil then
-        writer = DefaultWriter
-        writer.multipart = {}
+        multipart = {}
+        writer = {
+            write = default_write,
+            writefile = default_writefile,
+            multipart = multipart,
+        }
     elseif not pcall(function()
         assert(type(writer.write) == 'function')
         assert(type(writer.writefile) == 'function')
@@ -454,7 +459,6 @@ local function encode(form, boundary, writer)
         ctx.tmpfile:close()
     end
 
-    local multipart = reset_default_writer(writer)
     if not ok then
         return nil, toerror(res)
     elseif not res then

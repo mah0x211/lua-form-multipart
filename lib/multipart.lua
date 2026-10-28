@@ -313,13 +313,20 @@ local function encode_form(ctx, form)
                                                'failed to open file %q for %q: %s',
                                                part.pathname, name, err))
                             end
-                            part.file = tmpfile
-                            part.is_tmpfile = true
                             ctx.tmpfile = tmpfile
-                            n, err = encode_part(ctx, name, part,
+                            -- Keep library-owned handles out of reusable input.
+                            local file_part = {}
+                            for key, value in pairs(part) do
+                                file_part[key] = value
+                            end
+                            file_part.header = part.header
+                            file_part.filename = part.filename
+                            file_part.pathname = part.pathname
+                            file_part.file = tmpfile
+                            file_part.is_tmpfile = true
+                            n, err = encode_part(ctx, name, file_part,
                                                  encode_part_file)
                             close_tmpfile(ctx)
-                            part.is_tmpfile = nil
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field

@@ -80,6 +80,9 @@ remain, the file part has an empty body.
 The encoder closes files it opens from `pathname` on success or failure,
 including errors returned or raised by a writer. This cleanup does not close
 caller-supplied file handles.
+For pathname parts, the input is left unchanged so the form can be reused.
+Custom writers receive a shallow copy of the part with the internally opened
+`file` and `is_tmpfile=true`.
 
 **Returns**
 

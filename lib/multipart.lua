@@ -357,7 +357,7 @@ end
 --- is_valid_boundary
 --- @param boundary string
 --- @return boolean ok
---- @return any err
+--- @return string? err
 local function is_valid_boundary(boundary)
     --
     -- boundary := 0*69<bchars> bcharsnospace
@@ -372,9 +372,15 @@ local function is_valid_boundary(boundary)
         error('boundary must be string', 2)
     end
 
-    local pos = find(boundary, '[^0-9a-zA-Z\'()+_,-./:=?]')
+    if #boundary < 1 or #boundary > 70 then
+        return false, 'boundary length must be between 1 and 70 bytes'
+    elseif sub(boundary, -1) == ' ' then
+        return false, 'boundary must not end with a space'
+    end
+
+    local pos = find(boundary, '[^0-9a-zA-Z \'()+_,-./:=?]')
     if pos then
-        -- non bcharsnospace character found
+        -- A character outside bchars was found.
         return false, format('invalid character %q found in boundary',
                              sub(boundary, pos, pos))
 
@@ -788,8 +794,9 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
     end
 
     -- verify boundary
-    if type(boundary) ~= 'string' then
-        error('boundary must be string', 2)
+    local valid, boundary_err = is_valid_boundary(boundary)
+    if not valid then
+        error(boundary_err, 2)
     end
 
     -- verify filetmpl

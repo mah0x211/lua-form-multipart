@@ -13,6 +13,15 @@ encode/decode the multipart/form-data format.
 luarocks install form-multipart
 ```
 
+## ok, err = multipart.is_valid_boundary( boundary )
+
+Checks whether a boundary is valid. Returns `true` on success, or `false` and a
+reason string on failure. A non-string argument raises an error.
+
+A boundary must contain 1 to 70 bytes using ASCII letters, digits, spaces, or
+`'()+_,-./:=?`, and must not end with a space. Both `encode` and `decode` reject
+invalid boundary arguments before processing the form.
+
 ## Error Handling
 
 the following functions return the `error` object created by https://github.com/mah0x211/lua-error module.
@@ -53,7 +62,7 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
-- `boundary:string`: a boundary string.
+- `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
     ```
     n, err = writer:write( s )
@@ -204,7 +213,7 @@ decode a string in `multipart/form-data` format.
         - err:any: error value.
         - n:integer: number of bytes read.
         ```
-- `boundary:string`: a boundary string.
+- `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxsize:integer`: limit the maximum size per file.
 - `chunksize:integer`: if the `chunk` parameter is not string, number of byte to read from the `chunk.read` method. this value must be greater than `0`. (default: `4096`)

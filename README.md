@@ -16,6 +16,8 @@ luarocks install form-multipart
 ## Error Handling
 
 the following functions return the `error` object created by https://github.com/mah0x211/lua-error module.
+When part-field validation fails, `encode` returns `nil` and a
+`form.multipart.encode` error identifying the invalid field.
 
 
 ## res, err = multipart.encode( form, boundary [, writer] )
@@ -86,7 +88,7 @@ Custom writers receive a shallow copy of the part with the internally opened
 
 **Returns**
 
-- `res:string|integer`: a string in `multipart/form-data` format, or number of bytes written.
+- `res:string|integer|nil`: a string in `multipart/form-data` format, number of bytes written, or nil on error.
   - if the `writer` parameter is not specified, it returns a string in `multipart/form-data` format.
   - otherwise, it returns the number of bytes written to the `writer:write` and `writer:writefile` methods.
 - `err:any`: error value.

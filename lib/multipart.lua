@@ -298,7 +298,7 @@ local function encode_form(ctx, form)
                         if part.pathname ~= nil then
                             if type(part.pathname) ~= 'string' then
                                 -- invalid pathname field
-                                return nil, EENCODE(
+                                return nil, EENCODE:new(
                                            format(
                                                'pathname field in %q must be string',
                                                name))
@@ -330,7 +330,7 @@ local function encode_form(ctx, form)
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field
-                        return nil, EENCODE(
+                        return nil, EENCODE:new(
                                    format('file field in %q must be file*', name))
                     else
                         n, err = encode_part(ctx, name, part, encode_part_file)
@@ -427,7 +427,7 @@ end
 --- @param form table
 --- @param boundary string
 --- @param writer? form.multipart.writer
---- @return integer|string? res
+--- @return string|integer|nil res
 --- @return any err
 local function encode(form, boundary, writer)
     -- verify form

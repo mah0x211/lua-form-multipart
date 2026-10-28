@@ -372,7 +372,11 @@ local DefaultWriter = {
     writefile = function(self, file, len, offset, part)
         -- write file content
         file:seek('set', offset)
-        local s, err = file:read(len)
+        local s = ''
+        local err
+        if len > 0 then
+            s, err = file:read(len)
+        end
         if part.is_tmpfile then
             file:close()
         end

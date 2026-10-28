@@ -69,6 +69,8 @@ encode a form table to string in `multipart/form-data` format.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 
+Files with zero bytes are encoded as empty file parts.
+
 **Returns**
 
 - `res:string|integer`: a string in `multipart/form-data` format, or number of bytes written.

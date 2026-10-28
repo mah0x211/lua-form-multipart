@@ -77,6 +77,10 @@ writers receive that position as `offset` and the remaining length as `len`;
 they must honor these arguments and position the file as needed. If no bytes
 remain, the file part has an empty body.
 
+The encoder closes files it opens from `pathname` on success or failure,
+including errors returned or raised by a writer. This cleanup does not close
+caller-supplied file handles.
+
 **Returns**
 
 - `res:string|integer`: a string in `multipart/form-data` format, or number of bytes written.

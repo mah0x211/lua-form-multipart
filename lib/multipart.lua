@@ -33,6 +33,7 @@ local lower = string.lower
 local concat = table.concat
 local remove = os.remove
 local open = io.open
+local file_type = io.type
 local is = require('lauxhlib.is')
 local is_file = is.file
 local is_uint = is.uint
@@ -247,6 +248,17 @@ local VALID_DATATYPE = {
     ['boolean'] = true,
 }
 
+--- close_tmpfile
+--- @param ctx table
+local function close_tmpfile(ctx)
+    if ctx.tmpfile then
+        if file_type(ctx.tmpfile) == 'file' then
+            ctx.tmpfile:close()
+        end
+        ctx.tmpfile = nil
+    end
+end
+
 --- encode_form
 --- @param ctx table
 --- @param form table
@@ -306,7 +318,7 @@ local function encode_form(ctx, form)
                             ctx.tmpfile = tmpfile
                             n, err = encode_part(ctx, name, part,
                                                  encode_part_file)
-                            ctx.tmpfile = nil
+                            close_tmpfile(ctx)
                             part.is_tmpfile = nil
                         end
                     elseif not is_file(part.file) then
@@ -455,9 +467,7 @@ local function encode(form, boundary, writer)
 
     local res
     ok, res, err = pcall(encode_form, ctx, form)
-    if ctx.tmpfile then
-        ctx.tmpfile:close()
-    end
+    close_tmpfile(ctx)
 
     if not ok then
         return nil, toerror(res)

@@ -199,7 +199,7 @@ Content-Disposition: form-data; name="qux"\r\n
 ```
 
 
-## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxsize [, chunksize]]] )
+## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxfilesize [, chunksize]]] )
 
 decode a string in `multipart/form-data` format.
 
@@ -215,7 +215,7 @@ decode a string in `multipart/form-data` format.
         ```
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
-- `maxsize:integer`: limit the maximum size per file.
+- `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Zero permits only empty files; nil leaves file sizes unlimited.
 - `chunksize:integer`: if the `chunk` parameter is not string, number of byte to read from the `chunk.read` method. this value must be greater than `0`. (default: `4096`)
 
 **Returns**

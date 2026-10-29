@@ -431,10 +431,10 @@ function testcase.decode()
     err = assert.throws(multipart.decode, 'hello', 'boundary', {})
     assert.match(err, 'filetmpl must be string')
 
-    -- test that throws an error if maxsize argument is invalid
+    -- test that throws an error if maxfilesize argument is invalid
     err = assert.throws(multipart.decode, 'hello', 'boundary', '/tmp/test_file',
                         {})
-    assert.match(err, 'maxsize must be uint')
+    assert.match(err, 'maxfilesize must be uint')
 end
 
 function testcase.decode_with_reader()

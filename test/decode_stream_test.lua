@@ -137,7 +137,7 @@ function testcase.decode_uses_filename_star_and_removes_file_after_collection()
     assert.empty(files_with_prefix(prefix))
 end
 
-function testcase.decode_rejects_files_exceeding_maxsize()
+function testcase.decode_rejects_files_exceeding_maxfilesize()
     for _, payload in ipairs({ 'abcdef', 'abcdefgh\r\nnext' }) do
         local prefix = unused_prefix()
         local input = '--b\r\nContent-Disposition: form-data; name="foo"; filename="x"' ..

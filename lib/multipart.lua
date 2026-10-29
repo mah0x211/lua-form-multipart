@@ -24,6 +24,7 @@ local pairs = pairs
 local pcall = pcall
 local tostring = tostring
 local type = type
+local huge = math.huge
 local find = string.find
 local format = string.format
 local sub = string.sub
@@ -522,7 +523,6 @@ end
 --- @return any err
 local function skip_terminator(ctx)
     local buf = ctx.buf
-    local maxsize = ctx.maxsize
 
     while true do
         -- skip *LWSP CR?LF
@@ -530,10 +530,6 @@ local function skip_terminator(ctx)
         if head then
             ctx.buf = sub(buf, tail + 1)
             return true
-        end
-
-        if maxsize and maxsize - #buf <= 0 then
-            return false, EDECODE:new('multipart body too large')
         end
 
         -- read next chunk
@@ -557,7 +553,8 @@ local function decode_body(ctx, writer)
     local delimlen = #delimiter
     local close_delimiter = ctx.close_delimiter
     local close_delimlen = #close_delimiter
-    local maxsize = ctx.maxsize
+    local maxfilesize = ctx.maxfilesize or huge
+    local nwrite = 0
     local pos = 1
 
     while true do
@@ -571,6 +568,11 @@ local function decode_body(ctx, writer)
 
             -- following string matches <delimiter>
             if sub(buf, tail + 1, tail + delimlen) == delimiter then
+                nwrite = nwrite + head - 1
+                if nwrite > maxfilesize then
+                    return false, EDECODE:new('multipart body too large')
+                end
+
                 -- use the data before the line-feeds as body data
                 local ok, err = writer(sub(buf, 1, head - 1))
                 if not ok then
@@ -594,6 +596,11 @@ local function decode_body(ctx, writer)
                 return true, nil, true
             end
 
+            nwrite = nwrite + tail
+            if nwrite > maxfilesize then
+                return false, EDECODE:new('multipart body too large')
+            end
+
             -- use the data including line-feeds as body data
             local ok, err = writer(sub(buf, 1, tail))
             if not ok then
@@ -605,7 +612,9 @@ local function decode_body(ctx, writer)
             head, tail = find(buf, '\r?\n')
         end
 
-        if maxsize and maxsize - #buf <= 0 then
+        -- A split CRLF + closing delimiter can occupy close_delimlen + 1
+        -- buffered bytes. Only the remaining bytes are certainly file data.
+        if nwrite + #buf - close_delimlen - 1 > maxfilesize then
             return false, EDECODE:new('multipart body too large')
         end
 
@@ -774,11 +783,11 @@ end
 --- @param chunk string|table|userdata
 --- @param boundary string
 --- @param filetmpl string
---- @param maxsize integer
+--- @param maxfilesize? integer
 --- @param chunksize integer
 --- @return table? form
 --- @return any err
-local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
+local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
     local reader = chunk
     -- verify chunk
     if type(chunk) == 'string' then
@@ -808,9 +817,9 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
         filetmpl = filetmpl .. '_XXXXXX'
     end
 
-    -- verify maxsize
-    if maxsize ~= nil and not is_uint(maxsize) then
-        error('maxsize must be uint', 2)
+    -- verify maxfilesize
+    if maxfilesize ~= nil and not is_uint(maxfilesize) then
+        error('maxfilesize must be uint', 2)
     end
 
     local ctx = {
@@ -818,7 +827,6 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
         reader = reader,
         delimiter = '--' .. boundary,
         close_delimiter = '--' .. boundary .. '--',
-        maxsize = maxsize,
         chunksize = chunksize,
         buf = '',
     }
@@ -833,12 +841,9 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
         end
 
         -- setup body writer
-        local part_data, part_file, nwrite
+        local part_data, part_file
         local writer = function(s)
-            nwrite = nwrite + #s
-            if maxsize and maxsize - nwrite < 0 then
-                return false, EDECODE:new('multipart body too large')
-            elseif part_data then
+            if part_data then
                 part_data = part_data .. s
                 return true
             end
@@ -857,8 +862,8 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
             end
 
             local again
-            nwrite = 0
             if part.filename then
+                ctx.maxfilesize = maxfilesize
                 part.file, err, part.pathname = mkstemp(filetmpl)
                 if not part.file then
                     return false, err
@@ -869,6 +874,7 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
                 part_file:seek('set')
                 part_file = nil
             else
+                ctx.maxfilesize = nil
                 part_data = ''
                 ok, err, again = decode_body(ctx, writer)
                 part.data = part_data

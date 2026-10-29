@@ -33,6 +33,7 @@ local lower = string.lower
 local concat = table.concat
 local remove = os.remove
 local open = io.open
+local file_type = io.type
 local is = require('lauxhlib.is')
 local is_file = is.file
 local is_uint = is.uint
@@ -144,8 +145,13 @@ local function encode_part_file(ctx, name, part)
     -- if part.is_tmpfile is true, the writer:writefile method must close the
     -- file argument
     part.name = name
-    n = assert(file:seek('end'))
-    n, err = writer:writefile(file, n, 0, part)
+    local offset = assert(file:seek())
+    local len = assert(file:seek('end')) - offset
+    if len < 0 then
+        len = 0
+    end
+    assert(file:seek('set', offset))
+    n, err = writer:writefile(file, len, offset, part)
     if err then
         return nil, err
     end
@@ -242,6 +248,17 @@ local VALID_DATATYPE = {
     ['boolean'] = true,
 }
 
+--- close_tmpfile
+--- @param ctx table
+local function close_tmpfile(ctx)
+    if ctx.tmpfile then
+        if file_type(ctx.tmpfile) == 'file' then
+            ctx.tmpfile:close()
+        end
+        ctx.tmpfile = nil
+    end
+end
+
 --- encode_form
 --- @param ctx table
 --- @param form table
@@ -281,7 +298,7 @@ local function encode_form(ctx, form)
                         if part.pathname ~= nil then
                             if type(part.pathname) ~= 'string' then
                                 -- invalid pathname field
-                                return nil, EENCODE(
+                                return nil, EENCODE:new(
                                            format(
                                                'pathname field in %q must be string',
                                                name))
@@ -296,17 +313,24 @@ local function encode_form(ctx, form)
                                                'failed to open file %q for %q: %s',
                                                part.pathname, name, err))
                             end
-                            part.file = tmpfile
-                            part.is_tmpfile = true
                             ctx.tmpfile = tmpfile
-                            n, err = encode_part(ctx, name, part,
+                            -- Keep library-owned handles out of reusable input.
+                            local file_part = {}
+                            for key, value in pairs(part) do
+                                file_part[key] = value
+                            end
+                            file_part.header = part.header
+                            file_part.filename = part.filename
+                            file_part.pathname = part.pathname
+                            file_part.file = tmpfile
+                            file_part.is_tmpfile = true
+                            n, err = encode_part(ctx, name, file_part,
                                                  encode_part_file)
-                            ctx.tmpfile = nil
-                            part.is_tmpfile = nil
+                            close_tmpfile(ctx)
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field
-                        return nil, EENCODE(
+                        return nil, EENCODE:new(
                                    format('file field in %q must be file*', name))
                     else
                         n, err = encode_part(ctx, name, part, encode_part_file)
@@ -333,7 +357,7 @@ end
 --- is_valid_boundary
 --- @param boundary string
 --- @return boolean ok
---- @return any err
+--- @return string? err
 local function is_valid_boundary(boundary)
     --
     -- boundary := 0*69<bchars> bcharsnospace
@@ -348,9 +372,15 @@ local function is_valid_boundary(boundary)
         error('boundary must be string', 2)
     end
 
-    local pos = find(boundary, '[^0-9a-zA-Z\'()+_,-./:=?]')
+    if #boundary < 1 or #boundary > 70 then
+        return false, 'boundary length must be between 1 and 70 bytes'
+    elseif sub(boundary, -1) == ' ' then
+        return false, 'boundary must not end with a space'
+    end
+
+    local pos = find(boundary, '[^0-9a-zA-Z \'()+_,-./:=?]')
     if pos then
-        -- non bcharsnospace character found
+        -- A character outside bchars was found.
         return false, format('invalid character %q found in boundary',
                              sub(boundary, pos, pos))
 
@@ -363,44 +393,47 @@ end
 --- @field writefile fun(self, file:file*, len:integer, offset:integer, part:table):(n:integer?,err:any)
 
 --- @class form.multipart.default_writer : form.multipart.writer
---- @field multipart? string[]
-local DefaultWriter = {
-    write = function(self, s)
-        self.multipart[#self.multipart + 1] = s
-        return #s, nil
-    end,
-    writefile = function(self, file, len, offset, part)
-        -- write file content
-        file:seek('set', offset)
-        local s, err = file:read(len)
-        if part.is_tmpfile then
-            file:close()
-        end
+--- @field multipart string[]
 
-        if err then
-            return nil, format('failed to read file %q in %q: %s',
-                               part.filename, part.name, err)
-        end
-        return self:write(s)
-    end,
-}
+--- default_write
+--- @param self form.multipart.default_writer
+--- @param s string
+--- @return integer n
+local function default_write(self, s)
+    self.multipart[#self.multipart + 1] = s
+    return #s, nil
+end
 
---- reset_default_writer
---- @param writer form.multipart.writer
---- @return string[]? multipart
-local function reset_default_writer(writer)
-    if writer == DefaultWriter and DefaultWriter.multipart then
-        local multipart = DefaultWriter.multipart
-        DefaultWriter.multipart = nil
-        return multipart
+--- default_writefile
+--- @param self form.multipart.default_writer
+--- @param file file*
+--- @param len integer
+--- @param _ integer
+--- @param part table
+--- @return integer? n
+--- @return any err
+local function default_writefile(self, file, len, _, part)
+    local s = ''
+    local err
+    if len > 0 then
+        s, err = file:read(len)
     end
+    if part.is_tmpfile then
+        file:close()
+    end
+
+    if err then
+        return nil, format('failed to read file %q in %q: %s',
+                           part.filename, part.name, err)
+    end
+    return self:write(s)
 end
 
 --- encode
 --- @param form table
 --- @param boundary string
 --- @param writer? form.multipart.writer
---- @return integer|string? res
+--- @return string|integer|nil res
 --- @return any err
 local function encode(form, boundary, writer)
     -- verify form
@@ -424,9 +457,14 @@ local function encode(form, boundary, writer)
     end
 
     -- verify writer
+    local multipart
     if writer == nil then
-        writer = DefaultWriter
-        writer.multipart = {}
+        multipart = {}
+        writer = {
+            write = default_write,
+            writefile = default_writefile,
+            multipart = multipart,
+        }
     elseif not pcall(function()
         assert(type(writer.write) == 'function')
         assert(type(writer.writefile) == 'function')
@@ -442,11 +480,8 @@ local function encode(form, boundary, writer)
 
     local res
     ok, res, err = pcall(encode_form, ctx, form)
-    if ctx.tmpfile then
-        ctx.tmpfile:close()
-    end
+    close_tmpfile(ctx)
 
-    local multipart = reset_default_writer(writer)
     if not ok then
         return nil, toerror(res)
     elseif not res then
@@ -759,8 +794,9 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
     end
 
     -- verify boundary
-    if type(boundary) ~= 'string' then
-        error('boundary must be string', 2)
+    local valid, boundary_err = is_valid_boundary(boundary)
+    if not valid then
+        error(boundary_err, 2)
     end
 
     -- verify filetmpl

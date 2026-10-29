@@ -13,9 +13,20 @@ encode/decode the multipart/form-data format.
 luarocks install form-multipart
 ```
 
+## ok, err = multipart.is_valid_boundary( boundary )
+
+Checks whether a boundary is valid. Returns `true` on success, or `false` and a
+reason string on failure. A non-string argument raises an error.
+
+A boundary must contain 1 to 70 bytes using ASCII letters, digits, spaces, or
+`'()+_,-./:=?`, and must not end with a space. Both `encode` and `decode` reject
+invalid boundary arguments before processing the form.
+
 ## Error Handling
 
 the following functions return the `error` object created by https://github.com/mah0x211/lua-error module.
+When part-field validation fails, `encode` returns `nil` and a
+`form.multipart.encode` error identifying the invalid field.
 
 
 ## res, err = multipart.encode( form, boundary [, writer] )
@@ -51,7 +62,7 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
-- `boundary:string`: a boundary string.
+- `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
     ```
     n, err = writer:write( s )
@@ -64,14 +75,29 @@ encode a form table to string in `multipart/form-data` format.
     - n:integer: number of bytes written.
     - err:any: error value.
     - file:file*: file that contains the file data.
-    - len:integer: file size.
+    - len:integer: number of bytes from the current file position to the end of the file.
     - offset:integer: file offset at which to begin the writeout.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 
+Files with zero bytes are encoded as empty file parts.
+Files are encoded from their current position to the end of the file. Seek to
+position zero before calling `encode` to include the whole file. The encoder
+restores the starting position after determining the remaining length. Custom
+writers receive that position as `offset` and the remaining length as `len`;
+they must honor these arguments and position the file as needed. If no bytes
+remain, the file part has an empty body.
+
+The encoder closes files it opens from `pathname` on success or failure,
+including errors returned or raised by a writer. This cleanup does not close
+caller-supplied file handles.
+For pathname parts, the input is left unchanged so the form can be reused.
+Custom writers receive a shallow copy of the part with the internally opened
+`file` and `is_tmpfile=true`.
+
 **Returns**
 
-- `res:string|integer`: a string in `multipart/form-data` format, or number of bytes written.
+- `res:string|integer|nil`: a string in `multipart/form-data` format, number of bytes written, or nil on error.
   - if the `writer` parameter is not specified, it returns a string in `multipart/form-data` format.
   - otherwise, it returns the number of bytes written to the `writer:write` and `writer:writefile` methods.
 - `err:any`: error value.
@@ -187,7 +213,7 @@ decode a string in `multipart/form-data` format.
         - err:any: error value.
         - n:integer: number of bytes read.
         ```
-- `boundary:string`: a boundary string.
+- `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxsize:integer`: limit the maximum size per file.
 - `chunksize:integer`: if the `chunk` parameter is not string, number of byte to read from the `chunk.read` method. this value must be greater than `0`. (default: `4096`)

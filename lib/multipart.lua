@@ -634,7 +634,7 @@ end
 local function decode_header(ctx)
     local buf = ctx.buf
     local header = {}
-    local part = {}
+    local params = {}
     local pos = 1
 
     while true do
@@ -646,11 +646,12 @@ local function decode_header(ctx)
             -- end header lines
             if #line == 0 then
                 ctx.buf = sub(buf, tail + 1)
-                part.header = header
-                if part['filename*'] then
-                    part.filename = part['filename*']
-                end
-                return part
+                return {
+                    header = header,
+                    params = params,
+                    name = params.name,
+                    filename = params.filename,
+                }
             end
 
             -- extract header
@@ -668,8 +669,8 @@ local function decode_header(ctx)
             vals[#vals + 1] = v
             if k == 'content-disposition' then
                 -- split name="value"
-                for key, val in gmatch(v, '([^%s]+)="?([^"]+)"?') do
-                    part[lower(key)] = val
+                for field, val in gmatch(v, '([^%s]+)="?([^"]+)"?') do
+                    params[lower(field)] = val
                 end
             end
             buf = sub(buf, tail + 1)

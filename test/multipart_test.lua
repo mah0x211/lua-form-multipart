@@ -379,6 +379,7 @@ function testcase.decode()
     assert.equal(form.foo[1].file:read('*a'), 'bar file')
     assert.equal(form.foo[2], {
         name = 'foo',
+        params = { name = 'foo' },
         header = {
             ['content-disposition'] = {
                 'form-data; name="foo"',
@@ -399,6 +400,7 @@ function testcase.decode()
     assert.equal(form.qux, {
         {
             name = 'qux',
+            params = { name = 'qux' },
             header = {
                 ['content-disposition'] = {
                     'form-data; name="qux"',
@@ -408,6 +410,7 @@ function testcase.decode()
         },
         {
             name = 'qux',
+            params = { name = 'qux' },
             header = {
                 ['content-disposition'] = {
                     'form-data; name="qux"',
@@ -490,6 +493,7 @@ function testcase.decode_with_reader()
     assert.equal(form.foo[1].file:read('*a'), 'bar file')
     assert.equal(form.foo[2], {
         name = 'foo',
+        params = { name = 'foo' },
         header = {
             ['content-disposition'] = {
                 'form-data; name="foo"',
@@ -510,6 +514,7 @@ function testcase.decode_with_reader()
     assert.equal(form.qux, {
         {
             name = 'qux',
+            params = { name = 'qux' },
             header = {
                 ['content-disposition'] = {
                     'form-data; name="qux"',
@@ -519,6 +524,7 @@ function testcase.decode_with_reader()
         },
         {
             name = 'qux',
+            params = { name = 'qux' },
             header = {
                 ['content-disposition'] = {
                     'form-data; name="qux"',

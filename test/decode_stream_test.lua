@@ -113,7 +113,7 @@ function testcase.decode_reports_unavailable_temporary_directory()
     assert.empty(files_with_prefix(prefix))
 end
 
-function testcase.decode_uses_filename_star_and_removes_file_after_collection()
+function testcase.decode_keeps_filename_and_removes_file_after_collection()
     local prefix = unused_prefix()
     local input = '--b\r\nContent-Disposition: form-data; name="foo"; filename="old"; filename*="new"' ..
         '\r\n\r\npayload\r\n--b--'
@@ -122,7 +122,8 @@ function testcase.decode_uses_filename_star_and_removes_file_after_collection()
         local form, err = multipart.decode(input, 'b', prefix)
         assert.is_nil(err)
         local part = form.foo[1]
-        assert.equal(part.filename, 'new')
+        assert.equal(part.filename, 'old')
+        assert.equal(part.params['filename*'], 'new')
         assert.equal(part.file:read('*a'), 'payload')
         local file = assert(io.open(part.pathname))
         file:close()

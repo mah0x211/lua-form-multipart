@@ -223,6 +223,20 @@ decode a string in `multipart/form-data` format.
 - `form:table`: a form table
 - `err:any`: error value.
 
+Content-Disposition parameters are stored in `part.params`, including `name`
+and `filename`. `part.name` and `part.filename` mirror `part.params.name` and
+`part.params.filename`. The original header values remain in
+`part.header['content-disposition']`.
+
+`filename*` is retained in `part.params['filename*']` without decoding. It no
+longer overrides `part.filename` or causes a part to be treated as a file when
+`filename` is absent.
+
+Other parameters are available through `part.params` instead of directly on
+the part. For example, use `part.params.custom` instead of `part.custom`.
+Parameters named `file`, `pathname`, `gc`, `header`, `data`, or `params` cannot
+overwrite the fields managed by the decoder.
+
 **Usage**
 
 ```lua
@@ -290,6 +304,10 @@ print(dump(form))
 --                 }
 --             },
 --             name = "foo",
+--             params = {
+--                 filename = "bar.txt",
+--                 name = "foo"
+--             },
 --             pathname = "/tmp/lua_form_multipart_U6Fgvj"
 --         },
 --         [2] = {
@@ -299,7 +317,10 @@ print(dump(form))
 --                     [1] = "form-data; name=\"foo\""
 --                 }
 --             },
---             name = "foo"
+--             name = "foo",
+--             params = {
+--                 name = "foo"
+--             }
 --         }
 --     },
 --     qux = {
@@ -310,7 +331,10 @@ print(dump(form))
 --                     [1] = "form-data; name=\"qux\""
 --                 }
 --             },
---             name = "qux"
+--             name = "qux",
+--             params = {
+--                 name = "qux"
+--             }
 --         },
 --         [2] = {
 --             data = "",
@@ -319,7 +343,10 @@ print(dump(form))
 --                     [1] = "form-data; name=\"qux\""
 --                 }
 --             },
---             name = "qux"
+--             name = "qux",
+--             params = {
+--                 name = "qux"
+--             }
 --         }
 --     }
 -- }

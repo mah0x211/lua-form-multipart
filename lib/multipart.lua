@@ -668,6 +668,9 @@ local function decode_header(ctx)
             end
             vals[#vals + 1] = v
             if k == 'content-disposition' then
+                if #vals > 1 then
+                    return nil, EDECODE:new('duplicate Content-Disposition header')
+                end
                 -- split name="value"
                 for field, val in gmatch(v, '([^%s]+)="?([^"]+)"?') do
                     params[lower(field)] = val

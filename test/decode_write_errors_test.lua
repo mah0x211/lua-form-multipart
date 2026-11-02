@@ -5,6 +5,8 @@ local readdir = require('testcase.readdir')
 local rlimit = require('testcase.rlimit')
 local signal = require('testcase.signal')
 local multipart = require('form.multipart')
+local errlib = require('error')
+local errno = require('errno')
 local original_limit
 local ignoring_xfsz = false
 local prefixes = {}
@@ -64,6 +66,10 @@ local function check_write_failure(payload)
     assert.is_true(ok)
     assert.is_nil(form)
     assert.match(tostring(err), 'File too large')
+    assert.not_nil(multipart.EDECODE)
+    assert.equal(errlib.typeof(err), multipart.EDECODE)
+    assert.not_nil(errlib.is(err, errno.EFBIG))
+    assert.equal(errlib.is(err, errno.EFBIG).op, 'write')
     assert.empty(files_with_prefix(prefix))
 end
 

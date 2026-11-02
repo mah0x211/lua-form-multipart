@@ -24,11 +24,11 @@ local pairs = pairs
 local pcall = pcall
 local tostring = tostring
 local type = type
+local huge = math.huge
 local find = string.find
 local format = string.format
 local sub = string.sub
 local match = string.match
-local gmatch = string.gmatch
 local lower = string.lower
 local concat = table.concat
 local remove = os.remove
@@ -423,8 +423,8 @@ local function default_writefile(self, file, len, _, part)
     end
 
     if err then
-        return nil, format('failed to read file %q in %q: %s',
-                           part.filename, part.name, err)
+        return nil, format('failed to read file %q in %q: %s', part.filename,
+                           part.name, err)
     end
     return self:write(s)
 end
@@ -522,7 +522,6 @@ end
 --- @return any err
 local function skip_terminator(ctx)
     local buf = ctx.buf
-    local maxsize = ctx.maxsize
 
     while true do
         -- skip *LWSP CR?LF
@@ -530,10 +529,6 @@ local function skip_terminator(ctx)
         if head then
             ctx.buf = sub(buf, tail + 1)
             return true
-        end
-
-        if maxsize and maxsize - #buf <= 0 then
-            return false, EDECODE:new('multipart body too large')
         end
 
         -- read next chunk
@@ -557,7 +552,8 @@ local function decode_body(ctx, writer)
     local delimlen = #delimiter
     local close_delimiter = ctx.close_delimiter
     local close_delimlen = #close_delimiter
-    local maxsize = ctx.maxsize
+    local maxfilesize = ctx.maxfilesize or huge
+    local nwrite = 0
     local pos = 1
 
     while true do
@@ -571,6 +567,11 @@ local function decode_body(ctx, writer)
 
             -- following string matches <delimiter>
             if sub(buf, tail + 1, tail + delimlen) == delimiter then
+                nwrite = nwrite + head - 1
+                if nwrite > maxfilesize then
+                    return false, EDECODE:new('multipart body too large')
+                end
+
                 -- use the data before the line-feeds as body data
                 local ok, err = writer(sub(buf, 1, head - 1))
                 if not ok then
@@ -594,6 +595,11 @@ local function decode_body(ctx, writer)
                 return true, nil, true
             end
 
+            nwrite = nwrite + tail
+            if nwrite > maxfilesize then
+                return false, EDECODE:new('multipart body too large')
+            end
+
             -- use the data including line-feeds as body data
             local ok, err = writer(sub(buf, 1, tail))
             if not ok then
@@ -605,7 +611,9 @@ local function decode_body(ctx, writer)
             head, tail = find(buf, '\r?\n')
         end
 
-        if maxsize and maxsize - #buf <= 0 then
+        -- A split CRLF + closing delimiter can occupy close_delimlen + 1
+        -- buffered bytes. Only the remaining bytes are certainly file data.
+        if nwrite + #buf - close_delimlen - 1 > maxfilesize then
             return false, EDECODE:new('multipart body too large')
         end
 
@@ -618,6 +626,105 @@ local function decode_body(ctx, writer)
     end
 end
 
+-- RFC 2045 section 5.1: attribute = token; value = token / quoted-string.
+-- MIME tokens exclude whitespace, controls, and tspecials.
+local MIME_TOKEN = "[A-Za-z0-9!#$%%&'*+%.%^_`{|}~%-]+"
+local DISPOSITION_PARAM_PATTERN = '^[ \t]*(' .. MIME_TOKEN .. ')[ \t]*=[ \t]*'
+local MIME_TOKEN_PATTERN = '^' .. MIME_TOKEN
+local LEADING_LWSP_PATTERN = '^[ \t]*'
+
+--- Parse semicolon-separated attribute=value parameters from a
+--- Content-Disposition header value, e.g. form-data; name="upload".
+--- RFC 2183 section 2 and RFC 2045 section 5.1 allow token or quoted-string
+--- values; quoted-pair escapes follow RFC 822 sections 3.3 and 3.4.1.
+--- Returns an empty table without parameters; decode checks required name.
+--- @param str string Content-Disposition header field value
+--- @return table? params
+--- @return any err
+local function parse_disposition_params(str)
+    local params = {}
+    -- RFC 2183 section 2 permits zero parameters. RFC 7578 section 4.2
+    -- requires name for form-data; that check belongs to decode().
+    local pos = find(str, ';', 1, true)
+    while pos do
+        -- Parse the next attribute=value parameter.
+        local head, tail, key = find(str, DISPOSITION_PARAM_PATTERN, pos + 1)
+        if not head then
+            return nil, EDECODE:new('invalid Content-Disposition parameters')
+        end
+        pos = tail + 1
+
+        key = lower(key)
+        if params[key] ~= nil then
+            -- Duplicate parameters are invalid.
+            return nil, EDECODE:new('invalid Content-Disposition parameters')
+        end
+
+        if sub(str, pos, pos) == '"' then
+            -- Parse a quoted-string value.
+            pos = pos + 1
+            local chunks = {}
+
+            -- RFC 822 section 3.3: qtext excludes quote, backslash
+            -- and CR; a quoted-pair may escape any ASCII character.
+            head = find(str, '["\\\r]', pos)
+            while head do
+                local c = sub(str, head, head)
+                if c == '\r' then
+                    return nil, EDECODE:new(
+                               'invalid Content-Disposition parameters')
+                end
+                -- Append the text before the closing quote or quoted-pair.
+                chunks[#chunks + 1] = sub(str, pos, head - 1)
+
+                if c == '"' then
+                    -- End of the quoted-string; omit the closing quote.
+                    pos = head + 1
+                    break
+                elseif head == #str then
+                    -- A trailing backslash has no character to escape.
+                    return nil, EDECODE:new(
+                               'invalid Content-Disposition parameters')
+                end
+
+                -- Decode the quoted-pair: omit the backslash and keep the
+                -- following character verbatim, without interpreting it again.
+                chunks[#chunks + 1] = sub(str, head + 1, head + 1)
+                pos = head + 2
+                head = find(str, '["\\\r]', pos)
+            end
+
+            -- No closing quote was found.
+            if not head then
+                return nil,
+                       EDECODE:new('invalid Content-Disposition parameters')
+            end
+
+            params[key] = concat(chunks)
+        else
+            -- Parse a token value.
+            head, tail = find(str, MIME_TOKEN_PATTERN, pos)
+            if not head then
+                return nil,
+                       EDECODE:new('invalid Content-Disposition parameters')
+            end
+            params[key] = sub(str, head, tail)
+            pos = tail + 1
+        end
+
+        -- RFC 822 section 3.4.2 allows SP/HTAB around symbols. Outside
+        -- quoted strings, skip them before the next semicolon or end.
+        local _, whitespace_end = find(str, LEADING_LWSP_PATTERN, pos)
+        pos = whitespace_end + 1
+        if pos > #str then
+            break
+        elseif sub(str, pos, pos) ~= ';' then
+            return nil, EDECODE:new('invalid Content-Disposition parameters')
+        end
+    end
+    return params
+end
+
 --- decode_header
 --- @param ctx any
 --- @return table? part
@@ -625,7 +732,7 @@ end
 local function decode_header(ctx)
     local buf = ctx.buf
     local header = {}
-    local part = {}
+    local params = {} ---@type table?
     local pos = 1
 
     while true do
@@ -637,11 +744,12 @@ local function decode_header(ctx)
             -- end header lines
             if #line == 0 then
                 ctx.buf = sub(buf, tail + 1)
-                part.header = header
-                if part['filename*'] then
-                    part.filename = part['filename*']
-                end
-                return part
+                return {
+                    header = header,
+                    params = params,
+                    name = params.name,
+                    filename = params.filename,
+                }
             end
 
             -- extract header
@@ -658,9 +766,14 @@ local function decode_header(ctx)
             end
             vals[#vals + 1] = v
             if k == 'content-disposition' then
-                -- split name="value"
-                for key, val in gmatch(v, '([^%s]+)="?([^"]+)"?') do
-                    part[lower(key)] = val
+                if #vals > 1 then
+                    return nil,
+                           EDECODE:new('duplicate Content-Disposition header')
+                end
+                local err
+                params, err = parse_disposition_params(v)
+                if not params then
+                    return nil, err
                 end
             end
             buf = sub(buf, tail + 1)
@@ -716,8 +829,15 @@ local function discard_preamble(ctx)
     local pos = 1
 
     while true do
-        -- find line-feeds
-        local head, tail = find(buf, '[ \t]*\r?\n', pos)
+        -- Advance over contiguous text, retaining any trailing padding or CR
+        -- at the search position until the line ending arrives.
+        local head, tail = find(buf, '^[^ \t\r\n]+', pos)
+        if head then
+            pos = tail + 1
+        end
+
+        -- find line-feeds, including transport padding
+        head, tail = find(buf, '[ \t]*\r?\n', pos)
         while head do
             local line = sub(buf, 1, head - 1)
 
@@ -733,11 +853,6 @@ local function discard_preamble(ctx)
             buf = sub(buf, tail + 1)
             pos = 1
             head, tail = find(buf, '[ \t]*\r?\n')
-        end
-
-        local len = #buf
-        if len > 2 then
-            pos = len - 1
         end
 
         -- read next chunk
@@ -774,11 +889,11 @@ end
 --- @param chunk string|table|userdata
 --- @param boundary string
 --- @param filetmpl string
---- @param maxsize integer
+--- @param maxfilesize? integer
 --- @param chunksize integer
 --- @return table? form
 --- @return any err
-local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
+local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
     local reader = chunk
     -- verify chunk
     if type(chunk) == 'string' then
@@ -808,9 +923,9 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
         filetmpl = filetmpl .. '_XXXXXX'
     end
 
-    -- verify maxsize
-    if maxsize ~= nil and not is_uint(maxsize) then
-        error('maxsize must be uint', 2)
+    -- verify maxfilesize
+    if maxfilesize ~= nil and not is_uint(maxfilesize) then
+        error('maxfilesize must be uint', 2)
     end
 
     local ctx = {
@@ -818,7 +933,6 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
         reader = reader,
         delimiter = '--' .. boundary,
         close_delimiter = '--' .. boundary .. '--',
-        maxsize = maxsize,
         chunksize = chunksize,
         buf = '',
     }
@@ -833,12 +947,9 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
         end
 
         -- setup body writer
-        local part_data, part_file, nwrite
+        local part_data, part_file
         local writer = function(s)
-            nwrite = nwrite + #s
-            if maxsize and maxsize - nwrite < 0 then
-                return false, EDECODE:new('multipart body too large')
-            elseif part_data then
+            if part_data then
                 part_data = part_data .. s
                 return true
             end
@@ -856,9 +967,18 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
                            'Content-Disposition header does not contain a name parameter')
             end
 
+            -- Register the part before reading its body so failed uploads
+            -- are included in discard_form cleanup.
+            local parts = form[part.name]
+            if not parts then
+                parts = {}
+                form[part.name] = parts
+            end
+            parts[#parts + 1] = part
+
             local again
-            nwrite = 0
             if part.filename then
+                ctx.maxfilesize = maxfilesize
                 part.file, err, part.pathname = mkstemp(filetmpl)
                 if not part.file then
                     return false, err
@@ -869,6 +989,7 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
                 part_file:seek('set')
                 part_file = nil
             else
+                ctx.maxfilesize = nil
                 part_data = ''
                 ok, err, again = decode_body(ctx, writer)
                 part.data = part_data
@@ -878,15 +999,6 @@ local function decode(chunk, boundary, filetmpl, maxsize, chunksize)
             if not ok then
                 return false, err
             end
-
-            -- push to part list
-            local parts = form[part.name]
-            if not parts then
-                parts = {}
-                form[part.name] = parts
-            end
-            parts[#parts + 1] = part
-
         until not again
 
         ok, err = discard_epilogue(ctx)

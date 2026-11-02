@@ -80,20 +80,16 @@ encode a form table to string in `multipart/form-data` format.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 
-Files with zero bytes are encoded as empty file parts.
 Files are encoded from their current position to the end of the file. Seek to
-position zero before calling `encode` to include the whole file. The encoder
-restores the starting position after determining the remaining length. Custom
+position zero before calling `encode` to include the whole file. Custom
 writers receive that position as `offset` and the remaining length as `len`;
 they must honor these arguments and position the file as needed. If no bytes
 remain, the file part has an empty body.
 
-The encoder closes files it opens from `pathname` on success or failure,
-including errors returned or raised by a writer. This cleanup does not close
-caller-supplied file handles.
+The encoder closes files it opens from `pathname`. Caller-supplied file
+handles remain the caller's responsibility.
 For pathname parts, the input is left unchanged so the form can be reused.
-Custom writers receive a shallow copy of the part with the internally opened
-`file` and `is_tmpfile=true`.
+For these parts, custom writers receive `part.file` and `part.is_tmpfile=true`.
 
 **Returns**
 
@@ -199,7 +195,7 @@ Content-Disposition: form-data; name="qux"\r\n
 ```
 
 
-## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxsize [, chunksize]]] )
+## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxfilesize [, chunksize]]] )
 
 decode a string in `multipart/form-data` format.
 
@@ -215,13 +211,35 @@ decode a string in `multipart/form-data` format.
         ```
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
-- `maxsize:integer`: limit the maximum size per file.
+- `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Zero permits only empty files; nil leaves file sizes unlimited.
 - `chunksize:integer`: if the `chunk` parameter is not string, number of byte to read from the `chunk.read` method. this value must be greater than `0`. (default: `4096`)
 
 **Returns**
 
 - `form:table`: a form table
 - `err:any`: error value.
+
+Each part accepts only one Content-Disposition header. Repeated occurrences,
+even with identical values, return a decoding error. Separate parts may use
+the same `name`.
+
+Content-Disposition parameters accept token or quoted-string values, including
+empty quoted strings. Quoted-pair escapes are unescaped; `=` and `;` inside
+quoted strings remain part of the value. Malformed parameters and repeated
+parameter names (case-insensitive) return a decoding error. An unescaped CR
+in a quoted value is invalid. Quoted non-ASCII bytes remain accepted.
+
+Content-Disposition parameters are stored in `part.params`, including `name`
+and `filename`. `part.name` and `part.filename` mirror `part.params.name` and
+`part.params.filename`. The original header values remain in
+`part.header['content-disposition']`.
+
+`filename*` is retained in `part.params['filename*']` without decoding. It does
+not determine `part.filename` or cause a part to be treated as a file when
+`filename` is absent.
+
+Other parameters are available through `part.params`, for example
+`part.params.custom`.
 
 **Usage**
 
@@ -290,6 +308,10 @@ print(dump(form))
 --                 }
 --             },
 --             name = "foo",
+--             params = {
+--                 filename = "bar.txt",
+--                 name = "foo"
+--             },
 --             pathname = "/tmp/lua_form_multipart_U6Fgvj"
 --         },
 --         [2] = {
@@ -299,7 +321,10 @@ print(dump(form))
 --                     [1] = "form-data; name=\"foo\""
 --                 }
 --             },
---             name = "foo"
+--             name = "foo",
+--             params = {
+--                 name = "foo"
+--             }
 --         }
 --     },
 --     qux = {
@@ -310,7 +335,10 @@ print(dump(form))
 --                     [1] = "form-data; name=\"qux\""
 --                 }
 --             },
---             name = "qux"
+--             name = "qux",
+--             params = {
+--                 name = "qux"
+--             }
 --         },
 --         [2] = {
 --             data = "",
@@ -319,7 +347,10 @@ print(dump(form))
 --                     [1] = "form-data; name=\"qux\""
 --                 }
 --             },
---             name = "qux"
+--             name = "qux",
+--             params = {
+--                 name = "qux"
+--             }
 --         }
 --     }
 -- }

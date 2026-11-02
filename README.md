@@ -80,20 +80,16 @@ encode a form table to string in `multipart/form-data` format.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 
-Files with zero bytes are encoded as empty file parts.
 Files are encoded from their current position to the end of the file. Seek to
-position zero before calling `encode` to include the whole file. The encoder
-restores the starting position after determining the remaining length. Custom
+position zero before calling `encode` to include the whole file. Custom
 writers receive that position as `offset` and the remaining length as `len`;
 they must honor these arguments and position the file as needed. If no bytes
 remain, the file part has an empty body.
 
-The encoder closes files it opens from `pathname` on success or failure,
-including errors returned or raised by a writer. This cleanup does not close
-caller-supplied file handles.
+The encoder closes files it opens from `pathname`. Caller-supplied file
+handles remain the caller's responsibility.
 For pathname parts, the input is left unchanged so the form can be reused.
-Custom writers receive a shallow copy of the part with the internally opened
-`file` and `is_tmpfile=true`.
+For these parts, custom writers receive `part.file` and `part.is_tmpfile=true`.
 
 **Returns**
 
@@ -238,14 +234,12 @@ and `filename`. `part.name` and `part.filename` mirror `part.params.name` and
 `part.params.filename`. The original header values remain in
 `part.header['content-disposition']`.
 
-`filename*` is retained in `part.params['filename*']` without decoding. It no
-longer overrides `part.filename` or causes a part to be treated as a file when
+`filename*` is retained in `part.params['filename*']` without decoding. It does
+not determine `part.filename` or cause a part to be treated as a file when
 `filename` is absent.
 
-Other parameters are available through `part.params` instead of directly on
-the part. For example, use `part.params.custom` instead of `part.custom`.
-Parameters named `file`, `pathname`, `gc`, `header`, `data`, or `params` cannot
-overwrite the fields managed by the decoder.
+Other parameters are available through `part.params`, for example
+`part.params.custom`.
 
 **Usage**
 

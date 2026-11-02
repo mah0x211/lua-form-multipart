@@ -29,7 +29,6 @@ local find = string.find
 local format = string.format
 local sub = string.sub
 local match = string.match
-local gmatch = string.gmatch
 local lower = string.lower
 local concat = table.concat
 local remove = os.remove
@@ -424,8 +423,8 @@ local function default_writefile(self, file, len, _, part)
     end
 
     if err then
-        return nil, format('failed to read file %q in %q: %s',
-                           part.filename, part.name, err)
+        return nil, format('failed to read file %q in %q: %s', part.filename,
+                           part.name, err)
     end
     return self:write(s)
 end
@@ -627,6 +626,105 @@ local function decode_body(ctx, writer)
     end
 end
 
+-- RFC 2045 section 5.1: attribute = token; value = token / quoted-string.
+-- MIME tokens exclude whitespace, controls, and tspecials.
+local MIME_TOKEN = "[A-Za-z0-9!#$%%&'*+%.%^_`{|}~%-]+"
+local DISPOSITION_PARAM_PATTERN = '^[ \t]*(' .. MIME_TOKEN .. ')[ \t]*=[ \t]*'
+local MIME_TOKEN_PATTERN = '^' .. MIME_TOKEN
+local LEADING_LWSP_PATTERN = '^[ \t]*'
+
+--- Parse semicolon-separated attribute=value parameters from a
+--- Content-Disposition header value, e.g. form-data; name="upload".
+--- RFC 2183 section 2 and RFC 2045 section 5.1 allow token or quoted-string
+--- values; quoted-pair escapes follow RFC 822 sections 3.3 and 3.4.1.
+--- Returns an empty table without parameters; decode checks required name.
+--- @param str string Content-Disposition header field value
+--- @return table? params
+--- @return any err
+local function parse_disposition_params(str)
+    local params = {}
+    -- RFC 2183 section 2 permits zero parameters. RFC 7578 section 4.2
+    -- requires name for form-data; that check belongs to decode().
+    local pos = find(str, ';', 1, true)
+    while pos do
+        -- Parse the next attribute=value parameter.
+        local head, tail, key = find(str, DISPOSITION_PARAM_PATTERN, pos + 1)
+        if not head then
+            return nil, EDECODE:new('invalid Content-Disposition parameters')
+        end
+        pos = tail + 1
+
+        key = lower(key)
+        if params[key] ~= nil then
+            -- Duplicate parameters are invalid.
+            return nil, EDECODE:new('invalid Content-Disposition parameters')
+        end
+
+        if sub(str, pos, pos) == '"' then
+            -- Parse a quoted-string value.
+            pos = pos + 1
+            local chunks = {}
+
+            -- RFC 822 section 3.3: qtext excludes quote, backslash
+            -- and CR; a quoted-pair may escape any ASCII character.
+            head = find(str, '["\\\r]', pos)
+            while head do
+                local c = sub(str, head, head)
+                if c == '\r' then
+                    return nil, EDECODE:new(
+                               'invalid Content-Disposition parameters')
+                end
+                -- Append the text before the closing quote or quoted-pair.
+                chunks[#chunks + 1] = sub(str, pos, head - 1)
+
+                if c == '"' then
+                    -- End of the quoted-string; omit the closing quote.
+                    pos = head + 1
+                    break
+                elseif head == #str then
+                    -- A trailing backslash has no character to escape.
+                    return nil, EDECODE:new(
+                               'invalid Content-Disposition parameters')
+                end
+
+                -- Decode the quoted-pair: omit the backslash and keep the
+                -- following character verbatim, without interpreting it again.
+                chunks[#chunks + 1] = sub(str, head + 1, head + 1)
+                pos = head + 2
+                head = find(str, '["\\\r]', pos)
+            end
+
+            -- No closing quote was found.
+            if not head then
+                return nil,
+                       EDECODE:new('invalid Content-Disposition parameters')
+            end
+
+            params[key] = concat(chunks)
+        else
+            -- Parse a token value.
+            head, tail = find(str, MIME_TOKEN_PATTERN, pos)
+            if not head then
+                return nil,
+                       EDECODE:new('invalid Content-Disposition parameters')
+            end
+            params[key] = sub(str, head, tail)
+            pos = tail + 1
+        end
+
+        -- RFC 822 section 3.4.2 allows SP/HTAB around symbols. Outside
+        -- quoted strings, skip them before the next semicolon or end.
+        local _, whitespace_end = find(str, LEADING_LWSP_PATTERN, pos)
+        pos = whitespace_end + 1
+        if pos > #str then
+            break
+        elseif sub(str, pos, pos) ~= ';' then
+            return nil, EDECODE:new('invalid Content-Disposition parameters')
+        end
+    end
+    return params
+end
+
 --- decode_header
 --- @param ctx any
 --- @return table? part
@@ -634,7 +732,7 @@ end
 local function decode_header(ctx)
     local buf = ctx.buf
     local header = {}
-    local params = {}
+    local params = {} ---@type table?
     local pos = 1
 
     while true do
@@ -669,11 +767,13 @@ local function decode_header(ctx)
             vals[#vals + 1] = v
             if k == 'content-disposition' then
                 if #vals > 1 then
-                    return nil, EDECODE:new('duplicate Content-Disposition header')
+                    return nil,
+                           EDECODE:new('duplicate Content-Disposition header')
                 end
-                -- split name="value"
-                for field, val in gmatch(v, '([^%s]+)="?([^"]+)"?') do
-                    params[lower(field)] = val
+                local err
+                params, err = parse_disposition_params(v)
+                if not params then
+                    return nil, err
                 end
             end
             buf = sub(buf, tail + 1)

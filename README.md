@@ -24,9 +24,16 @@ invalid boundary arguments before processing the form.
 
 ## Error Handling
 
-the following functions return the `error` object created by https://github.com/mah0x211/lua-error module.
-When part-field validation fails, `encode` returns `nil` and a
-`form.multipart.encode` error identifying the invalid field.
+`encode` and `decode` return `nil, err` on failure, using error objects from
+[lua-error](https://github.com/mah0x211/lua-error). The outer error type is
+`multipart.EENCODE` for encoding and `multipart.EDECODE` for decoding.
+Original causes and available errno information are retained; string errors
+without an errno remain untyped causes. Invalid top-level arguments raise exceptions.
+
+Invalid part fields or malformed multipart data have an `errno.EINVAL` cause.
+Exceeding `maxfilesize` has an `errno.EFBIG` cause.
+Use `error.typeof(err)` to check the outer type and `error.is(err, errno.EINVAL)`
+or `error.is(err, errno.EFBIG)` to inspect causes.
 
 
 ## res, err = multipart.encode( form, boundary [, writer] )

@@ -40,7 +40,9 @@ local is_uint = is.uint
 local is_pint = is.pint
 local mkstemp = require('mkstemp')
 local gcfn = require('gcfn')
+local errorf = require('error').format
 local toerror = require('error').toerror
+local new_errno = require('errno').new
 local new_error_type = require('error').type.new
 -- constants
 local EENCODE = new_error_type('form.multipart.encode', nil,
@@ -120,6 +122,19 @@ local EDECODE = new_error_type('form.multipart.decode', nil,
 -- epilogue := discard-text
 --
 
+--- Seek a file, retaining the numeric errno when positioning fails.
+--- @param file file*
+--- @param whence? string
+--- @param offset? integer
+--- @return integer position
+local function seek_file(file, whence, offset)
+    local position, err, errnum = file:seek(whence, offset)
+    if not position then
+        error(new_errno(errnum, err, 'seek'), 0)
+    end
+    return position
+end
+
 --- encode_part_file
 --- @param ctx table
 --- @param name string
@@ -145,12 +160,12 @@ local function encode_part_file(ctx, name, part)
     -- if part.is_tmpfile is true, the writer:writefile method must close the
     -- file argument
     part.name = name
-    local offset = assert(file:seek())
-    local len = assert(file:seek('end')) - offset
+    local offset = seek_file(file)
+    local len = seek_file(file, 'end') - offset
     if len < 0 then
         len = 0
     end
-    assert(file:seek('set', offset))
+    seek_file(file, 'set', offset)
     n, err = writer:writefile(file, len, offset, part)
     if err then
         return nil, err
@@ -280,9 +295,9 @@ local function encode_form(ctx, form)
                 elseif t == 'table' then
                     if part.header ~= nil and type(part.header) ~= 'table' then
                         -- invalid header field
-                        return nil, EENCODE:new(
-                                   format('header field in %q must be table',
-                                          name))
+                        return nil, new_errno('EINVAL', format(
+                                                  'header field in %q must be table',
+                                                  name))
                     elseif part.filename == nil then
                         if VALID_DATATYPE[type(part.data)] then
                             n, err = encode_part(ctx, name, part,
@@ -290,28 +305,29 @@ local function encode_form(ctx, form)
                         end
                     elseif type(part.filename) ~= 'string' then
                         -- invalid filename field
-                        return nil, EENCODE:new(
-                                   format('filename field in %q must be string',
-                                          name))
+                        return nil, new_errno('EINVAL', format(
+                                                  'filename field in %q must be string',
+                                                  name))
                     elseif part.file == nil then
                         -- open file
                         if part.pathname ~= nil then
                             if type(part.pathname) ~= 'string' then
                                 -- invalid pathname field
-                                return nil, EENCODE:new(
-                                           format(
-                                               'pathname field in %q must be string',
-                                               name))
+                                return nil, new_errno('EINVAL', format(
+                                                          'pathname field in %q must be string',
+                                                          name))
                             end
 
                             -- open target file
-                            local tmpfile
-                            tmpfile, err = open(part.pathname)
+                            local tmpfile, errnum
+                            tmpfile, err, errnum = open(part.pathname)
                             if not tmpfile then
-                                return nil, toerror(
+                                return nil,
+                                       errorf(
                                            format(
-                                               'failed to open file %q for %q: %s',
-                                               part.pathname, name, err))
+                                               'failed to open file %q for %q',
+                                               part.pathname, name),
+                                           new_errno(errnum, err, 'open'))
                             end
                             ctx.tmpfile = tmpfile
                             -- Keep library-owned handles out of reusable input.
@@ -330,8 +346,9 @@ local function encode_form(ctx, form)
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field
-                        return nil, EENCODE:new(
-                                   format('file field in %q must be file*', name))
+                        return nil, new_errno('EINVAL', format(
+                                                  'file field in %q must be file*',
+                                                  name))
                     else
                         n, err = encode_part(ctx, name, part, encode_part_file)
                     end
@@ -414,17 +431,19 @@ end
 --- @return any err
 local function default_writefile(self, file, len, _, part)
     local s = ''
-    local err
+    local err, errnum
     if len > 0 then
-        s, err = file:read(len)
+        s, err, errnum = file:read(len)
     end
     if part.is_tmpfile then
         file:close()
     end
 
     if err then
-        return nil, format('failed to read file %q in %q: %s', part.filename,
-                           part.name, err)
+        return nil,
+               errorf(
+                   format('failed to read file %q in %q', part.filename,
+                          part.name), new_errno(errnum, err, 'read'))
     end
     return self:write(s)
 end
@@ -483,9 +502,9 @@ local function encode(form, boundary, writer)
     close_tmpfile(ctx)
 
     if not ok then
-        return nil, toerror(res)
+        return nil, EENCODE:new(nil, toerror(res))
     elseif not res then
-        return nil, toerror(err)
+        return nil, EENCODE:new(nil, toerror(err))
     elseif multipart then
         return concat(multipart, '')
     end
@@ -511,7 +530,7 @@ local function read_chunk(ctx)
     end
 
     if not str or #str == 0 then
-        return nil, EDECODE:new('insufficient multipart/form-data')
+        return nil, new_errno('EINVAL', 'insufficient multipart/form-data')
     end
     return str
 end
@@ -569,7 +588,7 @@ local function decode_body(ctx, writer)
             if sub(buf, tail + 1, tail + delimlen) == delimiter then
                 nwrite = nwrite + head - 1
                 if nwrite > maxfilesize then
-                    return false, EDECODE:new('multipart body too large')
+                    return false, new_errno('EFBIG', 'multipart body too large')
                 end
 
                 -- use the data before the line-feeds as body data
@@ -597,7 +616,7 @@ local function decode_body(ctx, writer)
 
             nwrite = nwrite + tail
             if nwrite > maxfilesize then
-                return false, EDECODE:new('multipart body too large')
+                return false, new_errno('EFBIG', 'multipart body too large')
             end
 
             -- use the data including line-feeds as body data
@@ -614,7 +633,7 @@ local function decode_body(ctx, writer)
         -- A split CRLF + closing delimiter can occupy close_delimlen + 1
         -- buffered bytes. Only the remaining bytes are certainly file data.
         if nwrite + #buf - close_delimlen - 1 > maxfilesize then
-            return false, EDECODE:new('multipart body too large')
+            return false, new_errno('EFBIG', 'multipart body too large')
         end
 
         -- read next chunk
@@ -650,14 +669,16 @@ local function parse_disposition_params(str)
         -- Parse the next attribute=value parameter.
         local head, tail, key = find(str, DISPOSITION_PARAM_PATTERN, pos + 1)
         if not head then
-            return nil, EDECODE:new('invalid Content-Disposition parameters')
+            return nil, new_errno('EINVAL',
+                                  'invalid Content-Disposition parameters')
         end
         pos = tail + 1
 
         key = lower(key)
         if params[key] ~= nil then
             -- Duplicate parameters are invalid.
-            return nil, EDECODE:new('invalid Content-Disposition parameters')
+            return nil, new_errno('EINVAL',
+                                  'invalid Content-Disposition parameters')
         end
 
         if sub(str, pos, pos) == '"' then
@@ -671,8 +692,8 @@ local function parse_disposition_params(str)
             while head do
                 local c = sub(str, head, head)
                 if c == '\r' then
-                    return nil, EDECODE:new(
-                               'invalid Content-Disposition parameters')
+                    return nil, new_errno('EINVAL',
+                                          'invalid Content-Disposition parameters')
                 end
                 -- Append the text before the closing quote or quoted-pair.
                 chunks[#chunks + 1] = sub(str, pos, head - 1)
@@ -683,8 +704,8 @@ local function parse_disposition_params(str)
                     break
                 elseif head == #str then
                     -- A trailing backslash has no character to escape.
-                    return nil, EDECODE:new(
-                               'invalid Content-Disposition parameters')
+                    return nil, new_errno('EINVAL',
+                                          'invalid Content-Disposition parameters')
                 end
 
                 -- Decode the quoted-pair: omit the backslash and keep the
@@ -696,8 +717,8 @@ local function parse_disposition_params(str)
 
             -- No closing quote was found.
             if not head then
-                return nil,
-                       EDECODE:new('invalid Content-Disposition parameters')
+                return nil, new_errno('EINVAL',
+                                      'invalid Content-Disposition parameters')
             end
 
             params[key] = concat(chunks)
@@ -705,8 +726,8 @@ local function parse_disposition_params(str)
             -- Parse a token value.
             head, tail = find(str, MIME_TOKEN_PATTERN, pos)
             if not head then
-                return nil,
-                       EDECODE:new('invalid Content-Disposition parameters')
+                return nil, new_errno('EINVAL',
+                                      'invalid Content-Disposition parameters')
             end
             params[key] = sub(str, head, tail)
             pos = tail + 1
@@ -719,7 +740,8 @@ local function parse_disposition_params(str)
         if pos > #str then
             break
         elseif sub(str, pos, pos) ~= ';' then
-            return nil, EDECODE:new('invalid Content-Disposition parameters')
+            return nil, new_errno('EINVAL',
+                                  'invalid Content-Disposition parameters')
         end
     end
     return params
@@ -755,7 +777,8 @@ local function decode_header(ctx)
             -- extract header
             local k, v = match(line, '([^: \t]+)%s*:%s*(.+)')
             if not k then
-                return nil, EDECODE:new(format('invalid header %q', line))
+                return nil,
+                       new_errno('EINVAL', format('invalid header %q', line))
             end
 
             k = lower(k)
@@ -767,8 +790,8 @@ local function decode_header(ctx)
             vals[#vals + 1] = v
             if k == 'content-disposition' then
                 if #vals > 1 then
-                    return nil,
-                           EDECODE:new('duplicate Content-Disposition header')
+                    return nil, new_errno('EINVAL',
+                                          'duplicate Content-Disposition header')
                 end
                 local err
                 params, err = parse_disposition_params(v)
@@ -846,8 +869,8 @@ local function discard_preamble(ctx)
                 ctx.buf = sub(buf, tail + 1)
                 return true
             elseif line == close_delimiter then
-                return false, EDECODE:new(
-                           'end of boundary found, but boundary not started')
+                return false, new_errno('EINVAL',
+                                        'end of boundary found, but boundary not started')
             end
 
             buf = sub(buf, tail + 1)
@@ -953,7 +976,12 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
                 part_data = part_data .. s
                 return true
             end
-            return part_file:write(s)
+            local result, write_err, errnum = part_file:write(s)
+            -- Preserve the numeric errno returned by Lua for file-write errors.
+            if not result and errnum then
+                return nil, new_errno(errnum, write_err, 'write')
+            end
+            return result, write_err
         end
 
         -- parse body-part
@@ -963,8 +991,8 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
             if not part then
                 return false, err
             elseif not part.name then
-                return false, EDECODE:new(
-                           'Content-Disposition header does not contain a name parameter')
+                return false, new_errno('EINVAL',
+                                        'Content-Disposition header does not contain a name parameter')
             end
 
             -- Register the part before reading its body so failed uploads
@@ -981,7 +1009,8 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
                 ctx.maxfilesize = maxfilesize
                 part.file, err, part.pathname = mkstemp(filetmpl)
                 if not part.file then
-                    return false, err
+                    return false, errorf(
+                               'failed to create multipart temporary file', err)
                 end
                 part.gc = gcfn(gc_discard_form_file, part.pathname)
                 part_file = part.file
@@ -1011,15 +1040,17 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
     -- failed to parse
     if not ok then
         discard_form(form)
-        return nil, toerror(res)
+        return nil, EDECODE:new(nil, toerror(res))
     elseif not res then
         discard_form(form)
-        return nil, toerror(err)
+        return nil, EDECODE:new(nil, toerror(err))
     end
     return form
 end
 
 return {
+    EENCODE = EENCODE,
+    EDECODE = EDECODE,
     is_valid_boundary = is_valid_boundary,
     encode = encode,
     decode = decode,

@@ -965,6 +965,15 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
                            'Content-Disposition header does not contain a name parameter')
             end
 
+            -- Register the part before reading its body so failed uploads
+            -- are included in discard_form cleanup.
+            local parts = form[part.name]
+            if not parts then
+                parts = {}
+                form[part.name] = parts
+            end
+            parts[#parts + 1] = part
+
             local again
             if part.filename then
                 ctx.maxfilesize = maxfilesize
@@ -988,15 +997,6 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
             if not ok then
                 return false, err
             end
-
-            -- push to part list
-            local parts = form[part.name]
-            if not parts then
-                parts = {}
-                form[part.name] = parts
-            end
-            parts[#parts + 1] = part
-
         until not again
 
         ok, err = discard_epilogue(ctx)

@@ -829,8 +829,15 @@ local function discard_preamble(ctx)
     local pos = 1
 
     while true do
-        -- find line-feeds
-        local head, tail = find(buf, '[ \t]*\r?\n', pos)
+        -- Advance over contiguous text, retaining any trailing padding or CR
+        -- at the search position until the line ending arrives.
+        local head, tail = find(buf, '^[^ \t\r\n]+', pos)
+        if head then
+            pos = tail + 1
+        end
+
+        -- find line-feeds, including transport padding
+        head, tail = find(buf, '[ \t]*\r?\n', pos)
         while head do
             local line = sub(buf, 1, head - 1)
 
@@ -846,11 +853,6 @@ local function discard_preamble(ctx)
             buf = sub(buf, tail + 1)
             pos = 1
             head, tail = find(buf, '[ \t]*\r?\n')
-        end
-
-        local len = #buf
-        if len > 2 then
-            pos = len - 1
         end
 
         -- read next chunk

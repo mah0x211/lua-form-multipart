@@ -513,14 +513,22 @@ end
 
 --- read_chunk
 --- @param ctx table
+--- @param allow_eof? boolean
 --- @return string? str
 --- @return any err
-local function read_chunk(ctx)
+local function read_chunk(ctx, allow_eof)
     local str
     if ctx.reader then
         -- read next chunk
+        -- Read at most one byte beyond the remaining budget to distinguish
+        -- an exact-size stream ending at EOF from an oversized stream.
+        local chunksize = ctx.chunksize
+        local remaining = ctx.maxsize - ctx.nread
+        if remaining < chunksize then
+            chunksize = remaining + 1
+        end
         local err
-        str, err = ctx.reader:read(ctx.chunksize)
+        str, err = ctx.reader:read(chunksize)
         if err then
             return nil, err
         end
@@ -530,7 +538,16 @@ local function read_chunk(ctx)
     end
 
     if not str or #str == 0 then
+        if allow_eof then
+            return nil
+        end
         return nil, new_errno('EINVAL', 'insufficient multipart/form-data')
+    end
+
+    -- Account for each received byte once, including bytes discarded later.
+    ctx.nread = ctx.nread + #str
+    if ctx.nread > ctx.maxsize then
+        return nil, new_errno('EFBIG', 'multipart body exceeds maxsize')
     end
     return str
 end
@@ -824,20 +841,13 @@ end
 ---@return any err
 local function discard_epilogue(ctx)
     ctx.buf = nil
-    if not ctx.reader then
-        ctx.chunk = nil
-        return true
-    end
-
-    local reader = ctx.reader
-    local chunksize = ctx.chunksize
+    local s, err
     repeat
-        local s, err = reader:read(chunksize)
+        s, err = read_chunk(ctx, true)
         if err then
             return false, err
         end
-    until not s or #s == 0
-
+    until not s
     return true
 end
 
@@ -914,9 +924,10 @@ end
 --- @param filetmpl string
 --- @param maxfilesize? integer
 --- @param chunksize integer
+--- @param maxsize? integer Maximum received multipart body bytes.
 --- @return table? form
 --- @return any err
-local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
+local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize)
     local reader = chunk
     -- verify chunk
     if type(chunk) == 'string' then
@@ -951,12 +962,19 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
         error('maxfilesize must be uint', 2)
     end
 
+    -- verify maxsize
+    if maxsize ~= nil and not is_uint(maxsize) then
+        error('maxsize must be uint', 2)
+    end
+
     local ctx = {
         chunk = chunk,
         reader = reader,
         delimiter = '--' .. boundary,
         close_delimiter = '--' .. boundary .. '--',
         chunksize = chunksize,
+        maxsize = maxsize or huge,
+        nread = 0,
         buf = '',
     }
 

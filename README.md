@@ -31,7 +31,7 @@ Original causes and available errno information are retained; string errors
 without an errno remain untyped causes. Invalid top-level arguments raise exceptions.
 
 Invalid part fields or malformed multipart data have an `errno.EINVAL` cause.
-Exceeding `maxfilesize` has an `errno.EFBIG` cause.
+Exceeding `maxfilesize` or `maxsize` has an `errno.EFBIG` cause.
 Use `error.typeof(err)` to check the outer type and `error.is(err, errno.EINVAL)`
 or `error.is(err, errno.EFBIG)` to inspect causes.
 
@@ -202,7 +202,7 @@ Content-Disposition: form-data; name="qux"\r\n
 ```
 
 
-## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxfilesize [, chunksize]]] )
+## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxfilesize [, chunksize [, maxsize]]]] )
 
 decode a string in `multipart/form-data` format.
 
@@ -214,12 +214,13 @@ decode a string in `multipart/form-data` format.
         s, err = chunk:read( n )
         - s:string: a string in multipart/form-data format.
         - err:any: error value.
-        - n:integer: number of bytes read.
+        - n:integer: maximum number of bytes to read.
         ```
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Zero permits only empty files; nil leaves file sizes unlimited.
-- `chunksize:integer`: if the `chunk` parameter is not string, number of byte to read from the `chunk.read` method. this value must be greater than `0`. (default: `4096`)
+- `chunksize:integer`: if `chunk` is not a string, the maximum number of bytes requested from `chunk.read` per call. This value must be greater than `0`. Requests may be smaller when `maxsize` is set. (default: `4096`)
+- `maxsize:integer`: maximum total bytes received, including the preamble, part headers, text and file data, boundaries, padding and epilogue. Must be a nonnegative integer; nil leaves the total unlimited. Exactly the limit is allowed. This limit is independent of `maxfilesize`.
 
 **Returns**
 

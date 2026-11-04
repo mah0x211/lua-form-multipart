@@ -231,7 +231,8 @@ Invalid suffixes after a normal or closing boundary delimiter return a decoding
 error. SP/HTAB padding is accepted; normal delimiters require a line ending,
 while closing delimiters may end at EOF.
 
-Each part accepts only one Content-Disposition header. Repeated occurrences,
+Each part requires one Content-Disposition header with a `form-data`
+disposition type (case-insensitive) and a `name` parameter. Repeated headers,
 even with identical values, return a decoding error. Separate parts may use
 the same `name`.
 

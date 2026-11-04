@@ -849,6 +849,13 @@ local function decode_header(ctx)
                     return nil, new_errno('EINVAL',
                                           'duplicate Content-Disposition header')
                 end
+                -- RFC 7578 section 4.2 requires form-data. Disposition
+                -- types are case-insensitive (RFC 2183 section 2).
+                local disposition = match(v, '^[^;]*')
+                if not match(lower(disposition), '^form%-data[ \t]*$') then
+                    return nil, new_errno('EINVAL',
+                                          'Content-Disposition type must be form-data')
+                end
                 local err
                 params, err = parse_disposition_params(v)
                 if not params then

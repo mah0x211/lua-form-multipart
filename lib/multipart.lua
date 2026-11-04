@@ -554,26 +554,65 @@ end
 
 --- skip_terminator
 --- @param ctx table
+--- @param allow_eof? boolean Closing delimiters may end after padding at EOF.
 --- @return boolean ok
 --- @return any err
-local function skip_terminator(ctx)
+local function skip_terminator(ctx, allow_eof)
     local buf = ctx.buf
 
+    -- Discard SP/HTAB transport padding (RFC 2046 section 5.1.1).
     while true do
-        -- skip *LWSP CR?LF
-        local head, tail = find(buf, '[ \t]*\r?\n')
-        if head then
-            ctx.buf = sub(buf, tail + 1)
-            return true
+        local _, tail = find(buf, '^[ \t]+')
+        if tail then
+            buf = sub(buf, tail + 1)
         end
 
-        -- read next chunk
-        local chunk, err = read_chunk(ctx)
-        if not chunk then
-            return false, err
+        if #buf > 0 then
+            -- Padding has ended.
+            break
         end
-        buf = buf .. chunk
+
+        -- Need more data to determine whether padding continues.
+        local chunk, err = read_chunk(ctx, allow_eof)
+        if not chunk then
+            if err then
+                return false, err
+            end
+            -- EOF is final; epilogue discard must not read the source again.
+            ctx.reader = nil
+            ctx.chunk = nil
+            ctx.buf = ''
+            return true
+        end
+        buf = chunk
     end
+
+    -- Padding has ended. A CR must be followed immediately by LF;
+    -- keep accepting LF-only line endings for compatibility.
+    local pos = 1
+    local c = sub(buf, 1, 1)
+    if c == '\r' then
+        -- A CR must be followed by LF.
+        if #buf == 1 then
+            local chunk, err = read_chunk(ctx)
+            if not chunk then
+                return false, err
+            end
+            buf = buf .. chunk
+        end
+        pos = 2
+        c = sub(buf, 2, 2)
+    end
+
+    -- A LF-only line ending is accepted for compatibility.
+    if c ~= '\n' then
+        return false,
+               new_errno('EINVAL', 'invalid multipart boundary terminator')
+    end
+
+    -- Discard the line ending.
+    ctx.buf = sub(buf, pos + 1)
+    return true
 end
 
 --- decode_body
@@ -619,7 +658,7 @@ local function decode_body(ctx, writer)
                 -- found close_delimiter
                 if sub(buf, 1, 2) == '--' then
                     ctx.buf = sub(buf, 3)
-                    return true
+                    return skip_terminator(ctx, true)
                 end
                 ctx.buf = buf
 

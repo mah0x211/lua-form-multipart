@@ -227,6 +227,10 @@ decode a string in `multipart/form-data` format.
 - `form:table`: a form table
 - `err:any`: error value.
 
+Invalid suffixes after a normal or closing boundary delimiter return a decoding
+error. SP/HTAB padding is accepted; normal delimiters require a line ending,
+while closing delimiters may end at EOF.
+
 Each part accepts only one Content-Disposition header. Repeated occurrences,
 even with identical values, return a decoding error. Separate parts may use
 the same `name`.

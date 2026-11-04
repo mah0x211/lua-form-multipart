@@ -686,10 +686,20 @@ local function decode_body(ctx, writer)
             head, tail = find(buf, '\r?\n')
         end
 
-        -- A split CRLF + closing delimiter can occupy close_delimlen + 1
-        -- buffered bytes. Only the remaining bytes are certainly file data.
-        if nwrite + #buf - close_delimlen - 1 > maxfilesize then
-            return false, new_errno('EFBIG', 'multipart body too large')
+        -- Retain a possible split CRLF + closing delimiter; write the
+        -- preceding confirmed body bytes before reading another chunk.
+        local nbody = #buf - close_delimlen - 1
+        if nbody > 0 then
+            nwrite = nwrite + nbody
+            if nwrite > maxfilesize then
+                return false, new_errno('EFBIG', 'multipart body too large')
+            end
+
+            local ok, err = writer(sub(buf, 1, nbody))
+            if not ok then
+                return false, err
+            end
+            buf = sub(buf, nbody + 1)
         end
 
         -- read next chunk

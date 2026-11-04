@@ -45,7 +45,7 @@ function testcase.after_each()
     prefixes = {}
 end
 
-local function check_write_failure(payload)
+local function check_write_failure(payload, chunksize)
     local file, _, pathname = assert(mkstemp('./decode_write_XXXXXX'))
     file:close()
     assert(os.remove(pathname))
@@ -60,7 +60,18 @@ local function check_write_failure(payload)
     ignoring_xfsz = true
     -- Change only the soft limit, which can be restored without privileges.
     assert(rlimit('fsize', 0))
-    local ok, form, err = pcall(multipart.decode, input, 'b', prefix)
+    local source = input
+    if chunksize then
+        local pos = 1
+        source = {
+            read = function(_, n)
+                local chunk = input:sub(pos, pos + n - 1)
+                pos = pos + #chunk
+                if #chunk > 0 then return chunk end
+            end,
+        }
+    end
+    local ok, form, err = pcall(multipart.decode, source, 'b', prefix, nil, chunksize)
     restore_environment()
 
     assert.is_true(ok)
@@ -80,4 +91,8 @@ end
 
 function testcase.decode_returns_write_error_in_multiline_body()
     check_write_failure(string.rep('x', 65536) .. '\r\nnext line')
+end
+
+function testcase.decode_returns_write_error_while_streaming_newline_free_body()
+    check_write_failure(string.rep('x', 65536), 4096)
 end

@@ -206,6 +206,12 @@ Content-Disposition: form-data; name="qux"\r\n
 
 decode a string in `multipart/form-data` format.
 
+For HTTP requests using `Transfer-Encoding: chunked`, the caller must decode
+the HTTP chunked transfer coding before passing a string or returning data
+from `chunk:read(n)`. HTTP chunk-size lines, chunk framing and trailers must
+not be included. The `chunksize` argument controls read requests and is
+independent of HTTP chunk boundaries.
+
 **Parameters**
 
 - `chunk:string|table|userdata`: a string in `multipart/form-data` format.
@@ -227,7 +233,12 @@ decode a string in `multipart/form-data` format.
 - `form:table`: a form table
 - `err:any`: error value.
 
-Each part accepts only one Content-Disposition header. Repeated occurrences,
+Invalid suffixes after a normal or closing boundary delimiter return a decoding
+error. SP/HTAB padding is accepted; normal delimiters require a line ending,
+while closing delimiters may end at EOF.
+
+Each part requires one Content-Disposition header with a `form-data`
+disposition type (case-insensitive) and a `name` parameter. Repeated headers,
 even with identical values, return a decoding error. Separate parts may use
 the same `name`.
 

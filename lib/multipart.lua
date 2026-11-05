@@ -844,9 +844,15 @@ local function decode_header(ctx)
                 }
             end
 
-            -- extract header
-            local k, v = match(line, '([^: \t]+)%s*:%s*(.+)')
-            if not k then
+            -- RFC 5322 section 3.6.8: field names are printable ASCII
+            -- excluding space/colon. Retain SP/HTAB before the colon
+            -- as allowed by obs-optional (section 4.5.8).
+            -- Skip only SP/HTAB after it (RFC 822 section 3.3), so
+            -- malformed structured values are not normalized into valid ones.
+            local k, v = match(line, '^([^: \t]+)[ \t]*:[ \t]*(.+)')
+            -- [^!-~] matches bytes outside 0x21-0x7E. Use literal characters
+            -- because Lua 5.1 does not support \xHH string escapes.
+            if not k or find(k, '[^!-~]') then
                 return nil,
                        new_errno('EINVAL', format('invalid header %q', line))
             end

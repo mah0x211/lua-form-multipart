@@ -55,7 +55,9 @@ end
 
 function testcase.decode_rejects_junk_before_header_names()
     for _, prefix in ipairs({ 'junk ', 'junk\t', ' ', '\t', ': ' }) do
-        local input = input_for(prefix .. 'X-Test: value')
+        -- Place it first so SP/HTAB cannot be a valid continuation.
+        local input = '--b\r\n' .. prefix .. 'X-Test: value\r\n' ..
+            'Content-Disposition: form-data; name="foo"\r\n\r\nvalue\r\n--b--'
         assert_invalid_header(multipart.decode(input, 'b'))
         for _, chunksize in ipairs({ 1, 7, 4096 }) do
             assert_invalid_header(multipart.decode(reader(input), 'b', nil, nil, chunksize))

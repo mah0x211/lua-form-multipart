@@ -245,6 +245,10 @@ error. Separate parts may use the same `name`.
 Only Content-Disposition and Content-Type are retained in `part.header`.
 Other part headers are ignored; Content-Transfer-Encoding is not processed.
 
+Folded header fields are accepted: a line beginning with SP or HTAB
+continues the preceding field. Fold line endings are removed; whitespace
+between value tokens and within quoted strings is retained.
+
 Content-Disposition parameters accept token or quoted-string values, including
 empty quoted strings. Quoted-pair escapes are unescaped; `=` and `;` inside
 quoted strings remain part of the value. Malformed parameters and repeated
@@ -253,8 +257,8 @@ in a quoted value is invalid. Quoted non-ASCII bytes remain accepted.
 
 Content-Disposition parameters are stored in `part.params`, including `name`
 and `filename`. `part.name` and `part.filename` mirror `part.params.name` and
-`part.params.filename`. The original header values remain in
-`part.header['content-disposition']`.
+`part.params.filename`. Content-Disposition values, after unfolding,
+are available in `part.header['content-disposition']`.
 
 `filename*` is retained in `part.params['filename*']` without decoding. It does
 not determine `part.filename` or cause a part to be treated as a file when

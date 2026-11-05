@@ -97,7 +97,7 @@ function testcase.decode_rejects_invalid_type_before_reading_part_body()
         read = function()
             calls = calls + 1
             assert.equal(calls, 1)
-            return '--b\r\nContent-Disposition: attachment; name="foo"\r\n'
+            return '--b\r\nContent-Disposition: attachment; name="foo"\r\n\r\n'
         end,
     }
     assert_invalid_type(multipart.decode(source, 'b'))

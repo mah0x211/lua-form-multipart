@@ -27,6 +27,7 @@ local type = type
 local huge = math.huge
 local find = string.find
 local format = string.format
+local gsub = string.gsub
 local sub = string.sub
 local match = string.match
 local lower = string.lower
@@ -817,96 +818,135 @@ local function parse_disposition_params(str)
     return params
 end
 
---- decode_header
---- @param ctx any
---- @return table? part
+--- Consume a field while retaining its internal fold line endings.
+--- @param ctx table
+--- @return string? line Raw field without its final line ending; empty ends headers.
 --- @return any err
-local function decode_header(ctx)
+local function consume_headerline(ctx)
     local buf = ctx.buf
-    local header = {}
-    local params = {} ---@type table?
     local pos = 1
 
     while true do
-        -- find line-feeds
-        local head, tail = find(buf, '[ \t]*\r?\n', pos)
+        -- Capture the position after LF so an empty separator does not
+        -- consume SP/HTAB belonging to the first body line.
+        local head, tail, afterlf = find(buf, '\r?\n()[ \t]*', pos)
         while head do
-            local line = sub(buf, 1, head - 1)
+            if head == 1 then
+                ctx.buf = sub(buf, afterlf)
+                return ''
+            end
 
-            -- end header lines
-            if #line == 0 then
+            -- RFC 822 section 3.1.1: SP/HTAB after a line ending
+            -- continues the same field. Keep that whitespace in the value.
+            if afterlf <= tail then
+                -- Continuation line detected; keep the whitespace in the value.
+                pos = tail + 1
+            elseif tail < #buf then
+                -- No continuation line; this is the end of the header line.
                 ctx.buf = sub(buf, tail + 1)
-                return {
-                    header = header,
-                    params = params,
-                    name = params.name,
-                    filename = params.filename,
-                }
+                return sub(buf, 1, head - 1)
+            else
+                -- LF at the chunk edge needs continuation lookahead.
+                -- Keep the position at the start of the line.
+                pos = head
+                break
             end
 
-            -- RFC 5322 section 3.6.8: field names are printable ASCII
-            -- excluding space/colon. Retain SP/HTAB before the colon
-            -- as allowed by obs-optional (section 4.5.8).
-            -- Skip only SP/HTAB after it (RFC 822 section 3.3), so
-            -- malformed structured values are not normalized into valid ones.
-            local k, v = match(line, '^([^: \t]+)[ \t]*:[ \t]*(.*)')
-            -- [^!-~] matches bytes outside 0x21-0x7E. Use literal characters
-            -- because Lua 5.1 does not support \xHH string escapes.
-            if not k or find(k, '[^!-~]') then
-                return nil,
-                       new_errno('EINVAL', format('invalid header %q', line))
-            end
-
-            k = lower(k)
-            local vals
-            -- RFC 7578 section 4.8: ignore unsupported part headers,
-            -- including fields with empty values.
-            if k == 'content-disposition' or k == 'content-type' then
-                if v == '' then
-                    return nil,
-                           new_errno('EINVAL', format('invalid header %q', line))
-                end
-                vals = header[k]
-                if not vals then
-                    vals = {}
-                    header[k] = vals
-                end
-                vals[#vals + 1] = v
-            end
-            if k == 'content-disposition' then
-                if #vals > 1 then
-                    return nil, new_errno('EINVAL',
-                                          'duplicate Content-Disposition header')
-                end
-                -- RFC 7578 section 4.2 requires form-data. Disposition
-                -- types are case-insensitive (RFC 2183 section 2).
-                local disposition = match(v, '^[^;]*')
-                if not match(lower(disposition), '^form%-data[ \t]*$') then
-                    return nil, new_errno('EINVAL',
-                                          'Content-Disposition type must be form-data')
-                end
-                local err
-                params, err = parse_disposition_params(v)
-                if not params then
-                    return nil, err
-                end
-            end
-            buf = sub(buf, tail + 1)
-            pos = 1
-            head, tail = find(buf, '\r?\n')
+            -- Continue searching for the next line ending.
+            head, tail, afterlf = find(buf, '\r?\n()[ \t]*', pos)
         end
 
-        local len = #buf
-        if len > 2 then
-            pos = len - 1
+        -- If no line ending was found, set the position to the end of the buffer
+        -- to read more data in the next iteration.
+        if not head then
+            pos = #buf
         end
 
-        -- read next chunk
         local chunk, err = read_chunk(ctx)
         if not chunk then
             return nil, err
         end
         buf = buf .. chunk
+    end
+end
+
+--- decode_header
+--- @param ctx table
+--- @return table? part
+--- @return any err
+local function decode_header(ctx)
+    local header = {}
+    local params = {} ---@type table?
+
+    while true do
+        local line, err = consume_headerline(ctx)
+        if not line then
+            return nil, err
+        elseif line == '' then
+            return {
+                header = header,
+                params = params,
+                name = params.name,
+                filename = params.filename,
+            }
+        end
+
+        -- RFC 5322 section 3.6.8: field names are printable ASCII
+        -- excluding space/colon. Retain SP/HTAB before the colon
+        -- as allowed by obs-optional (section 4.5.8).
+        local k, v = match(line, '^([^: \t]+)[ \t]*:(.*)')
+        -- [^!-~] matches bytes outside 0x21-0x7E. Use literal characters
+        -- because Lua 5.1 does not support \xHH string escapes.
+        if not k or find(k, '[^!-~]') then
+            return nil, new_errno('EINVAL', format('invalid header %q', line))
+        end
+        k = lower(k)
+
+        -- RFC 7578 section 4.8: ignore unsupported part headers,
+        -- including fields with empty values.
+        -- Unfold only values, leaving names subject to validation. Retain
+        -- continuation whitespace; skip only leading SP/HTAB before values
+        -- (RFC 822 sections 3.1.1 and 3.3).
+        if k == 'content-disposition' then
+            v = match(gsub(v, '\r?\n', ''), '^[ \t]*(.*)')
+            if v == '' then
+                return nil,
+                       new_errno('EINVAL', format('invalid header %q', line))
+            elseif header[k] then
+                return nil, new_errno('EINVAL',
+                                      'duplicate Content-Disposition header')
+            end
+
+            -- RFC 7578 section 4.2 requires form-data. Disposition
+            -- types are case-insensitive (RFC 2183 section 2).
+            local disposition = match(v, '^[^;]*')
+            if not match(lower(disposition), '^form%-data[ \t]*$') then
+                return nil, new_errno('EINVAL',
+                                      'Content-Disposition type must be form-data')
+            end
+
+            params, err = parse_disposition_params(v)
+            if not params then
+                return nil, err
+            end
+
+            header[k] = {
+                v,
+            }
+        elseif k == 'content-type' then
+            v = match(gsub(v, '\r?\n', ''), '^[ \t]*(.*)')
+            if v == '' then
+                return nil,
+                       new_errno('EINVAL', format('invalid header %q', line))
+            end
+
+            local vals = header[k]
+            if not vals then
+                vals = {}
+                header[k] = vals
+            end
+            vals[#vals + 1] = v
+        end
     end
 end
 

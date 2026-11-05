@@ -125,7 +125,7 @@ function testcase.decode_accepts_all_mime_field_name_characters()
                 local form, err = multipart.decode(source, 'b', nil, nil, 1)
                 assert.is_nil(err)
                 assert.equal(form.foo[1].data, 'value')
-                assert.equal(form.foo[1].header[name:lower()], { 'value' })
+                assert.is_nil(form.foo[1].header[name:lower()])
             end
         end
     end
@@ -133,13 +133,16 @@ end
 
 function testcase.decode_preserves_header_padding_values_and_repeated_headers()
     for _, newline in ipairs({ '\r\n', '\n' }) do
-        local input = input_for('X-Test \t:\t first:second\r\nx-TEST\t : third')
+        local input = input_for('Content-Type \t:\t text/plain; source="urn:example"\r\n' ..
+            'content-TYPE\t : application/octet-stream')
         input = input:gsub('\r\n', newline)
         for _, source in ipairs({ input, reader(input) }) do
             local form, err = multipart.decode(source, 'b', nil, nil, 1)
             assert.is_nil(err)
             assert.equal(form.foo[1].data, 'value')
-            assert.equal(form.foo[1].header['x-test'], { 'first:second', 'third' })
+            assert.equal(form.foo[1].header['content-type'], {
+                'text/plain; source="urn:example"', 'application/octet-stream',
+            })
         end
     end
 end

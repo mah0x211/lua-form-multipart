@@ -238,9 +238,12 @@ error. SP/HTAB padding is accepted; normal delimiters require a line ending,
 while closing delimiters may end at EOF.
 
 Each part requires one Content-Disposition header with a `form-data`
-disposition type (case-insensitive) and a `name` parameter. Repeated headers,
-even with identical values, return a decoding error. Separate parts may use
-the same `name`.
+disposition type (case-insensitive) and a `name` parameter. Repeated
+Content-Disposition headers, even with identical values, return a decoding
+error. Separate parts may use the same `name`.
+
+Only Content-Disposition and Content-Type are retained in `part.header`.
+Other part headers are ignored; Content-Transfer-Encoding is not processed.
 
 Content-Disposition parameters accept token or quoted-string values, including
 empty quoted strings. Quoted-pair escapes are unescaped; `=` and `;` inside

@@ -849,7 +849,7 @@ local function decode_header(ctx)
             -- as allowed by obs-optional (section 4.5.8).
             -- Skip only SP/HTAB after it (RFC 822 section 3.3), so
             -- malformed structured values are not normalized into valid ones.
-            local k, v = match(line, '^([^: \t]+)[ \t]*:[ \t]*(.+)')
+            local k, v = match(line, '^([^: \t]+)[ \t]*:[ \t]*(.*)')
             -- [^!-~] matches bytes outside 0x21-0x7E. Use literal characters
             -- because Lua 5.1 does not support \xHH string escapes.
             if not k or find(k, '[^!-~]') then
@@ -858,12 +858,21 @@ local function decode_header(ctx)
             end
 
             k = lower(k)
-            local vals = header[k]
-            if not vals then
-                vals = {}
-                header[k] = vals
+            local vals
+            -- RFC 7578 section 4.8: ignore unsupported part headers,
+            -- including fields with empty values.
+            if k == 'content-disposition' or k == 'content-type' then
+                if v == '' then
+                    return nil,
+                           new_errno('EINVAL', format('invalid header %q', line))
+                end
+                vals = header[k]
+                if not vals then
+                    vals = {}
+                    header[k] = vals
+                end
+                vals[#vals + 1] = v
             end
-            vals[#vals + 1] = v
             if k == 'content-disposition' then
                 if #vals > 1 then
                     return nil, new_errno('EINVAL',

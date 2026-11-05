@@ -557,6 +557,7 @@ end
 --- @param allow_eof? boolean Closing delimiters may end after padding at EOF.
 --- @return boolean ok
 --- @return any err
+--- @return boolean? invalid True for invalid syntax; ctx.buf retains unconsumed data.
 local function skip_terminator(ctx, allow_eof)
     local buf = ctx.buf
 
@@ -606,8 +607,10 @@ local function skip_terminator(ctx, allow_eof)
 
     -- A LF-only line ending is accepted for compatibility.
     if c ~= '\n' then
+        ctx.buf = buf
         return false,
-               new_errno('EINVAL', 'invalid multipart boundary terminator')
+               new_errno('EINVAL', 'invalid multipart boundary terminator'),
+               true
     end
 
     -- Discard the line ending.
@@ -658,7 +661,8 @@ local function decode_body(ctx, writer)
                 -- found close_delimiter
                 if sub(buf, 1, 2) == '--' then
                     ctx.buf = sub(buf, 3)
-                    return skip_terminator(ctx, true)
+                    ok, err = skip_terminator(ctx, true)
+                    return ok, err
                 end
                 ctx.buf = buf
 
@@ -914,42 +918,56 @@ end
 local function discard_preamble(ctx)
     local buf = ctx.buf
     local delimiter = ctx.delimiter
-    local close_delimiter = ctx.close_delimiter
-    local pos = 1
+    local delimlen = #delimiter
 
     while true do
-        -- Advance over contiguous text, retaining any trailing padding or CR
-        -- at the search position until the line ending arrives.
-        local head, tail = find(buf, '^[^ \t\r\n]+', pos)
-        if head then
-            pos = tail + 1
+        -- Read the boundary plus two bytes for the optional closing "--".
+        while #buf < delimlen + 2 do
+            local chunk, err = read_chunk(ctx)
+            if not chunk then
+                return false, err
+            end
+            buf = buf .. chunk
         end
 
-        -- find line-feeds, including transport padding
-        head, tail = find(buf, '[ \t]*\r?\n', pos)
-        while head do
-            local line = sub(buf, 1, head - 1)
-
-            if line == delimiter then
-                -- discard preamble data
-                ctx.buf = sub(buf, tail + 1)
-                return true
-            elseif line == close_delimiter then
-                return false, new_errno('EINVAL',
-                                        'end of boundary found, but boundary not started')
+        if sub(buf, 1, delimlen) == delimiter then
+            buf = sub(buf, delimlen + 1)
+            local closing = sub(buf, 1, 2) == '--'
+            if closing then
+                buf = sub(buf, 3)
             end
 
-            buf = sub(buf, tail + 1)
-            pos = 1
-            head, tail = find(buf, '[ \t]*\r?\n')
+            ctx.buf = buf
+            local ok, err, invalid = skip_terminator(ctx)
+            if ok then
+                if closing then
+                    return false, new_errno('EINVAL',
+                                            'end of boundary found, but boundary not started')
+                end
+                return true
+            elseif not invalid then
+                return false, err
+            end
+
+            -- An invalid terminator belongs to preamble text. Keep any
+            -- data read ahead so the next boundary is not lost.
+            buf = ctx.buf
         end
 
-        -- read next chunk
-        local chunk, err = read_chunk(ctx)
-        if not chunk then
-            return false, err
+        -- This line is not a boundary. Discard it through LF without
+        -- retaining its fragments or matching again in the middle.
+        while true do
+            local head = find(buf, '\n', 1, true)
+            if head then
+                buf = sub(buf, head + 1)
+                break
+            end
+            local err
+            buf, err = read_chunk(ctx)
+            if not buf then
+                return false, err
+            end
         end
-        buf = buf .. chunk
     end
 end
 

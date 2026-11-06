@@ -46,6 +46,7 @@ local toerror = require('error').toerror
 local new_errno = require('errno').new
 local new_error_type = require('error').type.new
 -- constants
+local MAX_HEADERS_SIZE = 16384
 local EENCODE = new_error_type('form.multipart.encode', nil,
                                'form-multipart encode error')
 local EDECODE = new_error_type('form.multipart.decode', nil,
@@ -820,9 +821,11 @@ end
 
 --- Consume a field while retaining its internal fold line endings.
 --- @param ctx table
+--- @param total_bytes integer Previously consumed header bytes in this part.
 --- @return string? line Raw field without its final line ending; empty ends headers.
 --- @return any err
-local function consume_headerline(ctx)
+--- @return integer? total_bytes Cumulative header bytes on success.
+local function consume_headerline(ctx, total_bytes)
     local buf = ctx.buf
     local pos = 1
 
@@ -830,35 +833,36 @@ local function consume_headerline(ctx)
         -- Capture the position after LF so an empty separator does not
         -- consume SP/HTAB belonging to the first body line.
         local head, tail, afterlf = find(buf, '\r?\n()[ \t]*', pos)
-        while head do
-            if head == 1 then
-                ctx.buf = sub(buf, afterlf)
-                return ''
-            end
-
-            -- RFC 822 section 3.1.1: SP/HTAB after a line ending
-            -- continues the same field. Keep that whitespace in the value.
-            if afterlf <= tail then
-                -- Continuation line detected; keep the whitespace in the value.
-                pos = tail + 1
-            elseif tail < #buf then
-                -- No continuation line; this is the end of the header line.
-                ctx.buf = sub(buf, tail + 1)
-                return sub(buf, 1, head - 1)
-            else
-                -- LF at the chunk edge needs continuation lookahead.
-                -- Keep the position at the start of the line.
-                pos = head
-                break
-            end
-
-            -- Continue searching for the next line ending.
+        -- RFC 822 section 3.1.1: SP/HTAB after a line ending continues
+        -- the same field. Retain the raw fold bytes while finding its end.
+        while head and head ~= 1 and afterlf <= tail do
+            pos = tail + 1
             head, tail, afterlf = find(buf, '\r?\n()[ \t]*', pos)
         end
 
-        -- If no line ending was found, set the position to the end of the buffer
-        -- to read more data in the next iteration.
-        if not head then
+        -- Count through the ending, or all buffered bytes if incomplete.
+        -- An empty separator excludes any following body whitespace.
+        local len = tail or #buf
+        if head == 1 then
+            len = afterlf - 1
+        end
+        local size = total_bytes + len
+        if size > MAX_HEADERS_SIZE then
+            return nil,
+                   new_errno('EFBIG', 'multipart headers exceed 16384 bytes')
+        end
+
+        if head == 1 then
+            ctx.buf = sub(buf, afterlf)
+            return '', nil, size
+        elseif head and tail < #buf then
+            ctx.buf = sub(buf, tail + 1)
+            return sub(buf, 1, head - 1), nil, size
+        elseif head then
+            -- Recheck this ending when continuation lookahead arrives.
+            pos = head
+        else
+            -- Retain the last search byte for a CRLF split across chunks.
             pos = #buf
         end
 
@@ -870,21 +874,24 @@ local function consume_headerline(ctx)
     end
 end
 
---- decode_header
+--- decode_headers
 --- @param ctx table
 --- @return table? part
 --- @return any err
-local function decode_header(ctx)
-    local header = {}
+local function decode_headers(ctx)
+    local headers = {}
     local params = {} ---@type table?
+    -- Each part has its own cumulative received-header budget.
+    local total_bytes = 0
 
     while true do
-        local line, err = consume_headerline(ctx)
+        local line, err
+        line, err, total_bytes = consume_headerline(ctx, total_bytes)
         if not line then
             return nil, err
         elseif line == '' then
             return {
-                header = header,
+                header = headers,
                 params = params,
                 name = params.name,
                 filename = params.filename,
@@ -912,7 +919,7 @@ local function decode_header(ctx)
             if v == '' then
                 return nil,
                        new_errno('EINVAL', format('invalid header %q', line))
-            elseif header[k] then
+            elseif headers[k] then
                 return nil, new_errno('EINVAL',
                                       'duplicate Content-Disposition header')
             end
@@ -930,7 +937,7 @@ local function decode_header(ctx)
                 return nil, err
             end
 
-            header[k] = {
+            headers[k] = {
                 v,
             }
         elseif k == 'content-type' then
@@ -940,10 +947,10 @@ local function decode_header(ctx)
                        new_errno('EINVAL', format('invalid header %q', line))
             end
 
-            local vals = header[k]
+            local vals = headers[k]
             if not vals then
                 vals = {}
-                header[k] = vals
+                headers[k] = vals
             end
             vals[#vals + 1] = v
         end
@@ -1134,7 +1141,7 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize
         -- parse body-part
         repeat
             local part
-            part, err = decode_header(ctx)
+            part, err = decode_headers(ctx)
             if not part then
                 return false, err
             elseif not part.name then

@@ -249,6 +249,11 @@ Folded header fields are accepted: a line beginning with SP or HTAB
 continues the preceding field. Fold line endings are removed; whitespace
 between value tokens and within quoted strings is retained.
 
+The combined size of all headers in each part is limited to 16,384 received
+bytes. This includes ignored headers, names, colons, whitespace, all line
+endings and the final empty line separating headers from the body.
+Exceeding the limit returns an EDECODE error containing errno.EFBIG.
+
 Content-Disposition parameters accept token or quoted-string values, including
 empty quoted strings. Quoted-pair escapes are unescaped; `=` and `;` inside
 quoted strings remain part of the value. Malformed parameters and repeated

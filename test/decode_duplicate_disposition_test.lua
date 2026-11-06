@@ -33,12 +33,12 @@ function testcase.decode_rejects_duplicate_disposition_headers()
     end
 end
 
-function testcase.decode_allows_disposition_in_each_part_and_other_repeated_headers()
+function testcase.decode_allows_disposition_in_each_part_and_repeated_content_type()
     local input = table.concat({
         '--b',
         'Content-Disposition: form-data; name="foo"',
-        'X-Example: first',
-        'X-Example: second',
+        'Content-Type: text/plain',
+        'content-type: application/octet-stream',
         '',
         'one',
         '--b',
@@ -54,5 +54,7 @@ function testcase.decode_allows_disposition_in_each_part_and_other_repeated_head
     assert.equal(form.foo[2].data, 'two')
     assert.equal(form.foo[1].params, { name = 'foo' })
     assert.equal(form.foo[2].params, { name = 'foo' })
-    assert.equal(form.foo[1].header['x-example'], { 'first', 'second' })
+    assert.equal(form.foo[1].header['content-type'], {
+        'text/plain', 'application/octet-stream',
+    })
 end

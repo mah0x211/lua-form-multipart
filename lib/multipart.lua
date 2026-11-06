@@ -27,6 +27,7 @@ local type = type
 local huge = math.huge
 local find = string.find
 local format = string.format
+local gsub = string.gsub
 local sub = string.sub
 local match = string.match
 local lower = string.lower
@@ -45,6 +46,7 @@ local toerror = require('error').toerror
 local new_errno = require('errno').new
 local new_error_type = require('error').type.new
 -- constants
+local MAX_HEADERS_SIZE = 16384
 local EENCODE = new_error_type('form.multipart.encode', nil,
                                'form-multipart encode error')
 local EDECODE = new_error_type('form.multipart.decode', nil,
@@ -817,87 +819,141 @@ local function parse_disposition_params(str)
     return params
 end
 
---- decode_header
---- @param ctx any
---- @return table? part
+--- Consume a field while retaining its internal fold line endings.
+--- @param ctx table
+--- @param total_bytes integer Previously consumed header bytes in this part.
+--- @return string? line Raw field without its final line ending; empty ends headers.
 --- @return any err
-local function decode_header(ctx)
+--- @return integer? total_bytes Cumulative header bytes on success.
+local function consume_headerline(ctx, total_bytes)
     local buf = ctx.buf
-    local header = {}
-    local params = {} ---@type table?
     local pos = 1
 
     while true do
-        -- find line-feeds
-        local head, tail = find(buf, '[ \t]*\r?\n', pos)
-        while head do
-            local line = sub(buf, 1, head - 1)
-
-            -- end header lines
-            if #line == 0 then
-                ctx.buf = sub(buf, tail + 1)
-                return {
-                    header = header,
-                    params = params,
-                    name = params.name,
-                    filename = params.filename,
-                }
-            end
-
-            -- RFC 5322 section 3.6.8: field names are printable ASCII
-            -- excluding space/colon. Retain SP/HTAB before the colon
-            -- as allowed by obs-optional (section 4.5.8).
-            -- Skip only SP/HTAB after it (RFC 822 section 3.3), so
-            -- malformed structured values are not normalized into valid ones.
-            local k, v = match(line, '^([^: \t]+)[ \t]*:[ \t]*(.+)')
-            -- [^!-~] matches bytes outside 0x21-0x7E. Use literal characters
-            -- because Lua 5.1 does not support \xHH string escapes.
-            if not k or find(k, '[^!-~]') then
-                return nil,
-                       new_errno('EINVAL', format('invalid header %q', line))
-            end
-
-            k = lower(k)
-            local vals = header[k]
-            if not vals then
-                vals = {}
-                header[k] = vals
-            end
-            vals[#vals + 1] = v
-            if k == 'content-disposition' then
-                if #vals > 1 then
-                    return nil, new_errno('EINVAL',
-                                          'duplicate Content-Disposition header')
-                end
-                -- RFC 7578 section 4.2 requires form-data. Disposition
-                -- types are case-insensitive (RFC 2183 section 2).
-                local disposition = match(v, '^[^;]*')
-                if not match(lower(disposition), '^form%-data[ \t]*$') then
-                    return nil, new_errno('EINVAL',
-                                          'Content-Disposition type must be form-data')
-                end
-                local err
-                params, err = parse_disposition_params(v)
-                if not params then
-                    return nil, err
-                end
-            end
-            buf = sub(buf, tail + 1)
-            pos = 1
-            head, tail = find(buf, '\r?\n')
+        -- Capture the position after LF so an empty separator does not
+        -- consume SP/HTAB belonging to the first body line.
+        local head, tail, afterlf = find(buf, '\r?\n()[ \t]*', pos)
+        -- RFC 822 section 3.1.1: SP/HTAB after a line ending continues
+        -- the same field. Retain the raw fold bytes while finding its end.
+        while head and head ~= 1 and afterlf <= tail do
+            pos = tail + 1
+            head, tail, afterlf = find(buf, '\r?\n()[ \t]*', pos)
         end
 
-        local len = #buf
-        if len > 2 then
-            pos = len - 1
+        -- Count through the ending, or all buffered bytes if incomplete.
+        -- An empty separator excludes any following body whitespace.
+        local len = tail or #buf
+        if head == 1 then
+            len = afterlf - 1
+        end
+        local size = total_bytes + len
+        if size > MAX_HEADERS_SIZE then
+            return nil,
+                   new_errno('EFBIG', 'multipart headers exceed 16384 bytes')
         end
 
-        -- read next chunk
+        if head == 1 then
+            ctx.buf = sub(buf, afterlf)
+            return '', nil, size
+        elseif head and tail < #buf then
+            ctx.buf = sub(buf, tail + 1)
+            return sub(buf, 1, head - 1), nil, size
+        elseif head then
+            -- Recheck this ending when continuation lookahead arrives.
+            pos = head
+        else
+            -- Retain the last search byte for a CRLF split across chunks.
+            pos = #buf
+        end
+
         local chunk, err = read_chunk(ctx)
         if not chunk then
             return nil, err
         end
         buf = buf .. chunk
+    end
+end
+
+--- decode_headers
+--- @param ctx table
+--- @return table? part
+--- @return any err
+local function decode_headers(ctx)
+    local headers = {}
+    local params = {} ---@type table?
+    -- Each part has its own cumulative received-header budget.
+    local total_bytes = 0
+
+    while true do
+        local line, err
+        line, err, total_bytes = consume_headerline(ctx, total_bytes)
+        if not line then
+            return nil, err
+        elseif line == '' then
+            return {
+                header = headers,
+                params = params,
+                name = params.name,
+                filename = params.filename,
+            }
+        end
+
+        -- RFC 5322 section 3.6.8: field names are printable ASCII
+        -- excluding space/colon. Retain SP/HTAB before the colon
+        -- as allowed by obs-optional (section 4.5.8).
+        local k, v = match(line, '^([^: \t]+)[ \t]*:(.*)')
+        -- [^!-~] matches bytes outside 0x21-0x7E. Use literal characters
+        -- because Lua 5.1 does not support \xHH string escapes.
+        if not k or find(k, '[^!-~]') then
+            return nil, new_errno('EINVAL', format('invalid header %q', line))
+        end
+        k = lower(k)
+
+        -- RFC 7578 section 4.8: ignore unsupported part headers,
+        -- including fields with empty values.
+        -- Unfold only values, leaving names subject to validation. Retain
+        -- continuation whitespace; skip only leading SP/HTAB before values
+        -- (RFC 822 sections 3.1.1 and 3.3).
+        if k == 'content-disposition' then
+            v = match(gsub(v, '\r?\n', ''), '^[ \t]*(.*)')
+            if v == '' then
+                return nil,
+                       new_errno('EINVAL', format('invalid header %q', line))
+            elseif headers[k] then
+                return nil, new_errno('EINVAL',
+                                      'duplicate Content-Disposition header')
+            end
+
+            -- RFC 7578 section 4.2 requires form-data. Disposition
+            -- types are case-insensitive (RFC 2183 section 2).
+            local disposition = match(v, '^[^;]*')
+            if not match(lower(disposition), '^form%-data[ \t]*$') then
+                return nil, new_errno('EINVAL',
+                                      'Content-Disposition type must be form-data')
+            end
+
+            params, err = parse_disposition_params(v)
+            if not params then
+                return nil, err
+            end
+
+            headers[k] = {
+                v,
+            }
+        elseif k == 'content-type' then
+            v = match(gsub(v, '\r?\n', ''), '^[ \t]*(.*)')
+            if v == '' then
+                return nil,
+                       new_errno('EINVAL', format('invalid header %q', line))
+            end
+
+            local vals = headers[k]
+            if not vals then
+                vals = {}
+                headers[k] = vals
+            end
+            vals[#vals + 1] = v
+        end
     end
 end
 
@@ -1085,7 +1141,7 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize
         -- parse body-part
         repeat
             local part
-            part, err = decode_header(ctx)
+            part, err = decode_headers(ctx)
             if not part then
                 return false, err
             elseif not part.name then

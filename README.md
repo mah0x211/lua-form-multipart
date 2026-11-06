@@ -238,9 +238,21 @@ error. SP/HTAB padding is accepted; normal delimiters require a line ending,
 while closing delimiters may end at EOF.
 
 Each part requires one Content-Disposition header with a `form-data`
-disposition type (case-insensitive) and a `name` parameter. Repeated headers,
-even with identical values, return a decoding error. Separate parts may use
-the same `name`.
+disposition type (case-insensitive) and a `name` parameter. Repeated
+Content-Disposition headers, even with identical values, return a decoding
+error. Separate parts may use the same `name`.
+
+Only Content-Disposition and Content-Type are retained in `part.header`.
+Other part headers are ignored; Content-Transfer-Encoding is not processed.
+
+Folded header fields are accepted: a line beginning with SP or HTAB
+continues the preceding field. Fold line endings are removed; whitespace
+between value tokens and within quoted strings is retained.
+
+The combined size of all headers in each part is limited to 16,384 received
+bytes. This includes ignored headers, names, colons, whitespace, all line
+endings and the final empty line separating headers from the body.
+Exceeding the limit returns an EDECODE error containing errno.EFBIG.
 
 Content-Disposition parameters accept token or quoted-string values, including
 empty quoted strings. Quoted-pair escapes are unescaped; `=` and `;` inside
@@ -250,8 +262,8 @@ in a quoted value is invalid. Quoted non-ASCII bytes remain accepted.
 
 Content-Disposition parameters are stored in `part.params`, including `name`
 and `filename`. `part.name` and `part.filename` mirror `part.params.name` and
-`part.params.filename`. The original header values remain in
-`part.header['content-disposition']`.
+`part.params.filename`. Content-Disposition values, after unfolding,
+are available in `part.header['content-disposition']`.
 
 `filename*` is retained in `part.params['filename*']` without decoding. It does
 not determine `part.filename` or cause a part to be treated as a file when

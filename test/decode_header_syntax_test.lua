@@ -55,7 +55,9 @@ end
 
 function testcase.decode_rejects_junk_before_header_names()
     for _, prefix in ipairs({ 'junk ', 'junk\t', ' ', '\t', ': ' }) do
-        local input = input_for(prefix .. 'X-Test: value')
+        -- Place it first so SP/HTAB cannot be a valid continuation.
+        local input = '--b\r\n' .. prefix .. 'X-Test: value\r\n' ..
+            'Content-Disposition: form-data; name="foo"\r\n\r\nvalue\r\n--b--'
         assert_invalid_header(multipart.decode(input, 'b'))
         for _, chunksize in ipairs({ 1, 7, 4096 }) do
             assert_invalid_header(multipart.decode(reader(input), 'b', nil, nil, chunksize))
@@ -125,7 +127,7 @@ function testcase.decode_accepts_all_mime_field_name_characters()
                 local form, err = multipart.decode(source, 'b', nil, nil, 1)
                 assert.is_nil(err)
                 assert.equal(form.foo[1].data, 'value')
-                assert.equal(form.foo[1].header[name:lower()], { 'value' })
+                assert.is_nil(form.foo[1].header[name:lower()])
             end
         end
     end
@@ -133,13 +135,16 @@ end
 
 function testcase.decode_preserves_header_padding_values_and_repeated_headers()
     for _, newline in ipairs({ '\r\n', '\n' }) do
-        local input = input_for('X-Test \t:\t first:second\r\nx-TEST\t : third')
+        local input = input_for('Content-Type \t:\t text/plain; source="urn:example"\r\n' ..
+            'content-TYPE\t : application/octet-stream')
         input = input:gsub('\r\n', newline)
         for _, source in ipairs({ input, reader(input) }) do
             local form, err = multipart.decode(source, 'b', nil, nil, 1)
             assert.is_nil(err)
             assert.equal(form.foo[1].data, 'value')
-            assert.equal(form.foo[1].header['x-test'], { 'first:second', 'third' })
+            assert.equal(form.foo[1].header['content-type'], {
+                'text/plain; source="urn:example"', 'application/octet-stream',
+            })
         end
     end
 end

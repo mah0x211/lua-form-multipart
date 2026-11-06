@@ -369,13 +369,10 @@ function testcase.decode()
             ['content-disposition'] = {
                 'form-data; name="foo"; filename="bar.txt"',
             },
-            ['x-example'] = {
-                'example header1',
-                'example header2',
-            },
         },
         filename = 'bar.txt',
     })
+    assert.is_nil(form.foo[1].header['x-example'])
     assert.equal(form.foo[1].file:read('*a'), 'bar file')
     assert.equal(form.foo[2], {
         name = 'foo',
@@ -483,13 +480,10 @@ function testcase.decode_with_reader()
             ['content-disposition'] = {
                 'form-data; name="foo"; filename="bar.txt"',
             },
-            ['x-example'] = {
-                'example header1',
-                'example header2',
-            },
         },
         filename = 'bar.txt',
     })
+    assert.is_nil(form.foo[1].header['x-example'])
     assert.equal(form.foo[1].file:read('*a'), 'bar file')
     assert.equal(form.foo[2], {
         name = 'foo',

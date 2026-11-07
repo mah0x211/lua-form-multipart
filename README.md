@@ -202,14 +202,24 @@ Content-Disposition: form-data; name="qux"\r\n
 ```
 
 
-## form, err = multipart.decode( chunk, boundary [, filetmpl [, maxfilesize [, chunksize [, maxsize]]]] )
+## form, err = multipart.decode( chunk, boundary [, opts] )
 
-decode a string in `multipart/form-data` format.
+Decode a string in `multipart/form-data` format.
+
+The positional form remains supported:
+
+```lua
+form, err = multipart.decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize)
+```
+
+A single table supplies named options. All other argument combinations use
+the positional form and its existing validation.
+
 
 For HTTP requests using `Transfer-Encoding: chunked`, the caller must decode
 the HTTP chunked transfer coding before passing a string or returning data
 from `chunk:read(n)`. HTTP chunk-size lines, chunk framing and trailers must
-not be included. The `chunksize` argument controls read requests and is
+not be included. The `chunksize` setting controls read requests and is
 independent of HTTP chunk boundaries.
 
 **Parameters**
@@ -223,6 +233,10 @@ independent of HTTP chunk boundaries.
         - n:integer: maximum number of bytes to read.
         ```
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
+- `opts:table`: optional settings described below. Omitted fields use their defaults. The table is not modified.
+
+**Options**
+
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
 - `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Zero permits only empty files; nil leaves file sizes unlimited.
 - `chunksize:integer`: if `chunk` is not a string, the maximum number of bytes requested from `chunk.read` per call. This value must be greater than `0`. Requests may be smaller when `maxsize` is set. (default: `4096`)
@@ -325,7 +339,9 @@ local form = assert(multipart.decode({
             return s
         end
     end,
-}, 'example_boundary'))
+}, 'example_boundary', {
+    chunksize = 4096,
+}))
 print(dump(form))
 -- {
 --     foo = {

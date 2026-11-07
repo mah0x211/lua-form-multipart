@@ -635,11 +635,10 @@ local function decode_body(ctx, writer)
     local close_delimlen = #close_delimiter
     local maxfilesize = ctx.maxfilesize or huge
     local nwrite = 0
-    local pos = 1
 
     while true do
         -- find: CR?LF<delimiter>
-        local head, tail = find(buf, '\r?\n', pos)
+        local head, tail = find(buf, '\r?\n')
         while head do
             -- remaining buf size must greater than: len(<close_delimiter>)
             if #buf - tail < close_delimlen then
@@ -677,20 +676,12 @@ local function decode_body(ctx, writer)
                 return true, nil, true
             end
 
-            nwrite = nwrite + tail
-            if nwrite > maxfilesize then
+            -- Advance over confirmed payload without copying the remaining
+            -- buffer. Write these bytes together at a boundary or before refill.
+            if nwrite + tail > maxfilesize then
                 return false, new_errno('EFBIG', 'multipart body too large')
             end
-
-            -- use the data including line-feeds as body data
-            local ok, err = writer(sub(buf, 1, tail))
-            if not ok then
-                return false, err
-            end
-
-            buf = sub(buf, tail + 1)
-            pos = 1
-            head, tail = find(buf, '\r?\n')
+            head, tail = find(buf, '\r?\n', tail + 1)
         end
 
         -- Retain a possible split CRLF + closing delimiter; write the

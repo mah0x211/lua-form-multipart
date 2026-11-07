@@ -138,6 +138,31 @@ function testcase.decode_preserves_binary_body_and_fragmented_boundaries()
     end
 end
 
+function testcase.decode_preserves_newline_heavy_file_and_text_bodies()
+    for _, payload in ipairs({
+        string.rep('\n', 64),
+        string.rep('\r\n', 32),
+        string.rep('a\n--!\r\n', 16) .. 'tail\r',
+    }) do
+        local input = header .. payload ..
+            '\r\n--b\r\nContent-Disposition: form-data; name="text"\r\n\r\n' ..
+            payload .. ending
+        for _, source in ipairs({ input, reader(input) }) do
+            local form, err = multipart.decode(source, 'b', {
+                filetmpl = unused_prefix(),
+                maxfilesize = #payload,
+                chunksize = 7,
+                maxsize = #input,
+            })
+            assert.is_nil(err)
+            local file = form.upload[1].file
+            files[#files + 1] = file
+            assert.equal(file:read('*a'), payload)
+            assert.equal(form.text[1].data, payload)
+        end
+    end
+end
+
 function testcase.decode_enforces_file_limit_after_streamed_writes()
     local payload = string.rep('x', 16 * 1024)
     local input = header .. payload .. ending

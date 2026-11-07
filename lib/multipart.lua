@@ -558,20 +558,23 @@ end
 --- skip_terminator
 --- @param ctx table
 --- @param allow_eof? boolean Closing delimiters may end after padding at EOF.
+--- @param pos? integer Start position in ctx.buf; defaults to 1.
 --- @return boolean ok
 --- @return any err
---- @return boolean? invalid True for invalid syntax; ctx.buf retains unconsumed data.
-local function skip_terminator(ctx, allow_eof)
+--- @return boolean? invalid True for invalid syntax; resume at nextpos in ctx.buf.
+--- @return integer? nextpos Position to continue discarding an invalid line.
+local function skip_terminator(ctx, allow_eof, pos)
     local buf = ctx.buf
+    pos = pos or 1
 
     -- Discard SP/HTAB transport padding (RFC 2046 section 5.1.1).
     while true do
-        local _, tail = find(buf, '^[ \t]+')
+        local _, tail = find(buf, '^[ \t]+', pos)
         if tail then
-            buf = sub(buf, tail + 1)
+            pos = tail + 1
         end
 
-        if #buf > 0 then
+        if pos <= #buf then
             -- Padding has ended.
             break
         end
@@ -589,34 +592,34 @@ local function skip_terminator(ctx, allow_eof)
             return true
         end
         buf = chunk
+        pos = 1
     end
 
     -- Padding has ended. A CR must be followed immediately by LF;
     -- keep accepting LF-only line endings for compatibility.
-    local pos = 1
-    local c = sub(buf, 1, 1)
+    local c = sub(buf, pos, pos)
     if c == '\r' then
-        -- A CR must be followed by LF.
-        if #buf == 1 then
+        if pos == #buf then
             local chunk, err = read_chunk(ctx)
             if not chunk then
                 return false, err
             end
-            buf = buf .. chunk
+            -- Only the pending CR is needed from the preceding buffer.
+            buf = '\r' .. chunk
+            pos = 1
         end
-        pos = 2
-        c = sub(buf, 2, 2)
+        pos = pos + 1
+        c = sub(buf, pos, pos)
     end
 
-    -- A LF-only line ending is accepted for compatibility.
     if c ~= '\n' then
         ctx.buf = buf
         return false,
                new_errno('EINVAL', 'invalid multipart boundary terminator'),
-               true
+               true, pos
     end
 
-    -- Discard the line ending.
+    -- Discard the line ending and the consumed prefix once.
     ctx.buf = sub(buf, pos + 1)
     return true
 end
@@ -973,26 +976,28 @@ local function discard_preamble(ctx)
     local buf = ctx.buf
     local delimiter = ctx.delimiter
     local delimlen = #delimiter
+    local pos = 1
 
     while true do
         -- Read the boundary plus two bytes for the optional closing "--".
-        while #buf < delimlen + 2 do
+        while #buf - pos + 1 < delimlen + 2 do
             local chunk, err = read_chunk(ctx)
             if not chunk then
                 return false, err
             end
-            buf = buf .. chunk
+            buf = sub(buf, pos) .. chunk
+            pos = 1
         end
 
-        if sub(buf, 1, delimlen) == delimiter then
-            buf = sub(buf, delimlen + 1)
-            local closing = sub(buf, 1, 2) == '--'
+        if sub(buf, pos, pos + delimlen - 1) == delimiter then
+            pos = pos + delimlen
+            local closing = sub(buf, pos, pos + 1) == '--'
             if closing then
-                buf = sub(buf, 3)
+                pos = pos + 2
             end
 
             ctx.buf = buf
-            local ok, err, invalid = skip_terminator(ctx)
+            local ok, err, invalid, nextpos = skip_terminator(ctx, false, pos)
             if ok then
                 if closing then
                     return false, new_errno('EINVAL',
@@ -1005,15 +1010,15 @@ local function discard_preamble(ctx)
 
             -- An invalid terminator belongs to preamble text. Keep any
             -- data read ahead so the next boundary is not lost.
-            buf = ctx.buf
+            buf, pos = ctx.buf, nextpos
         end
 
         -- This line is not a boundary. Discard it through LF without
         -- retaining its fragments or matching again in the middle.
         while true do
-            local head = find(buf, '\n', 1, true)
+            local head = find(buf, '\n', pos, true)
             if head then
-                buf = sub(buf, head + 1)
+                pos = head + 1
                 break
             end
             local err
@@ -1021,6 +1026,7 @@ local function discard_preamble(ctx)
             if not buf then
                 return false, err
             end
+            pos = 1
         end
     end
 end

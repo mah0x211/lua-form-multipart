@@ -428,7 +428,7 @@ function testcase.decode()
     assert.match(err, 'boundary must be string')
 
     -- test that throws an error if filetmpl argument is invalid
-    err = assert.throws(multipart.decode, 'hello', 'boundary', {})
+    err = assert.throws(multipart.decode, 'hello', 'boundary', false)
     assert.match(err, 'filetmpl must be string')
 
     -- test that throws an error if maxfilesize argument is invalid

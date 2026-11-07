@@ -22,6 +22,7 @@
 local ipairs = ipairs
 local pairs = pairs
 local pcall = pcall
+local select = select
 local tostring = tostring
 local type = type
 local huge = math.huge
@@ -1054,16 +1055,63 @@ local function gc_discard_form_file(pathname)
     remove(pathname)
 end
 
+--- Normalize and validate decode options without modifying caller-owned tables.
+--- @param is_reader boolean Whether chunksize is used by the input reader.
+--- @param ... table|string|integer|nil Options table or legacy positional arguments.
+--- @return string filetmpl
+--- @return integer? maxfilesize
+--- @return any chunksize Validated only for reader input.
+--- @return integer? maxsize
+local function checkopts(is_reader, ...)
+    local narg = select('#', ...)
+    local filetmpl, maxfilesize, chunksize, maxsize = ...
+    local opts = filetmpl
+    if narg > 1 or type(filetmpl) ~= 'table' then
+        opts = {
+            filetmpl = filetmpl,
+            maxfilesize = maxfilesize,
+            chunksize = chunksize,
+            maxsize = maxsize,
+        }
+    end
+
+    filetmpl = opts.filetmpl
+    maxfilesize = opts.maxfilesize
+    chunksize = opts.chunksize
+    maxsize = opts.maxsize
+
+    if is_reader then
+        if chunksize == nil then
+            chunksize = 4096
+        elseif not is_pint(chunksize) then
+            error('chunksize must be positive integer', 3)
+        end
+    end
+
+    if filetmpl == nil then
+        filetmpl = '/tmp/lua_form_multipart_XXXXXX'
+    elseif type(filetmpl) ~= 'string' then
+        error('filetmpl must be string', 3)
+    else
+        filetmpl = filetmpl .. '_XXXXXX'
+    end
+
+    if maxfilesize ~= nil and not is_uint(maxfilesize) then
+        error('maxfilesize must be uint', 3)
+    end
+    if maxsize ~= nil and not is_uint(maxsize) then
+        error('maxsize must be uint', 3)
+    end
+    return filetmpl, maxfilesize, chunksize, maxsize
+end
+
 --- decode
 --- @param chunk string|table|userdata
 --- @param boundary string
---- @param filetmpl string
---- @param maxfilesize? integer
---- @param chunksize integer
---- @param maxsize? integer Maximum received multipart body bytes.
+--- @param ... table|string|integer|nil Options table or legacy filetmpl, maxfilesize, chunksize, maxsize.
 --- @return table? form
 --- @return any err
-local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize)
+local function decode(chunk, boundary, ...)
     local reader = chunk
     -- verify chunk
     if type(chunk) == 'string' then
@@ -1072,10 +1120,6 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize
         assert(type(reader.read) == 'function')
     end) then
         error('chunk must be string or it must have read method', 2)
-    elseif chunksize == nil then
-        chunksize = 4096
-    elseif not is_pint(chunksize) then
-        error('chunksize must be positive integer', 2)
     end
 
     -- verify boundary
@@ -1084,24 +1128,7 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize
         error(boundary_err, 2)
     end
 
-    -- verify filetmpl
-    if filetmpl == nil then
-        filetmpl = '/tmp/lua_form_multipart_XXXXXX'
-    elseif type(filetmpl) ~= 'string' then
-        error('filetmpl must be string', 2)
-    else
-        filetmpl = filetmpl .. '_XXXXXX'
-    end
-
-    -- verify maxfilesize
-    if maxfilesize ~= nil and not is_uint(maxfilesize) then
-        error('maxfilesize must be uint', 2)
-    end
-
-    -- verify maxsize
-    if maxsize ~= nil and not is_uint(maxsize) then
-        error('maxsize must be uint', 2)
-    end
+    local filetmpl, maxfilesize, chunksize, maxsize = checkopts(reader ~= nil, ...)
 
     local ctx = {
         chunk = chunk,

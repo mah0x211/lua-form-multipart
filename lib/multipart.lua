@@ -1127,7 +1127,7 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize
         local part_data, part_file
         local writer = function(s)
             if part_data then
-                part_data = part_data .. s
+                part_data[#part_data + 1] = s
                 return true
             end
             local result, write_err, errnum = part_file:write(s)
@@ -1173,9 +1173,9 @@ local function decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize
                 part_file = nil
             else
                 ctx.maxfilesize = nil
-                part_data = ''
+                part_data = {}
                 ok, err, again = decode_body(ctx, writer)
-                part.data = part_data
+                part.data = concat(part_data)
                 part_data = nil
             end
 

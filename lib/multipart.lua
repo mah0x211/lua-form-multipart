@@ -1061,21 +1061,20 @@ end
 --- @return integer? maxsize
 local function checkopts(is_reader, ...)
     local narg = select('#', ...)
-    local filetmpl, maxfilesize, chunksize, maxsize = ...
+    local filetmpl, maxfilesize, chunksize = ...
     local opts = filetmpl
     if narg > 1 or type(filetmpl) ~= 'table' then
         opts = {
             filetmpl = filetmpl,
             maxfilesize = maxfilesize,
             chunksize = chunksize,
-            maxsize = maxsize,
         }
     end
 
     filetmpl = opts.filetmpl
     maxfilesize = opts.maxfilesize
     chunksize = opts.chunksize
-    maxsize = opts.maxsize
+    local maxsize = opts.maxsize
 
     if is_reader then
         if chunksize == nil then
@@ -1105,7 +1104,7 @@ end
 --- decode
 --- @param chunk string|table|userdata
 --- @param boundary string
---- @param ... table|string|integer|nil Options table or legacy filetmpl, maxfilesize, chunksize, maxsize.
+--- @param ... table|string|integer|nil Options table or legacy filetmpl, maxfilesize, chunksize.
 --- @return table? form
 --- @return any err
 local function decode(chunk, boundary, ...)

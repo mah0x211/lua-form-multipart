@@ -206,14 +206,15 @@ Content-Disposition: form-data; name="qux"\r\n
 
 Decode a string in `multipart/form-data` format.
 
-The positional form remains supported:
+The positional form supports the arguments available in v0.4.0:
 
 ```lua
-form, err = multipart.decode(chunk, boundary, filetmpl, maxfilesize, chunksize, maxsize)
+form, err = multipart.decode(chunk, boundary, filetmpl, maxfilesize, chunksize)
 ```
 
 A single table supplies named options. All other argument combinations use
-the positional form and its existing validation.
+the positional form and its existing validation. Newer options, including
+`maxsize`, require the table form.
 
 
 For HTTP requests using `Transfer-Encoding: chunked`, the caller must decode

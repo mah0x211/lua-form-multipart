@@ -199,7 +199,11 @@ function testcase.decode_cleans_streamed_file_on_total_size_limit()
             if #chunk > 0 then return chunk end
         end,
     }
-    local form, err = multipart.decode(source, 'b', prefix, nil, 1024, maxsize)
+    local form, err = multipart.decode(source, 'b', {
+        filetmpl = prefix,
+        chunksize = 1024,
+        maxsize = maxsize,
+    })
     assert.is_nil(form)
     assert.equal(errlib.typeof(err), multipart.EDECODE)
     assert.not_nil(errlib.is(err, errno.EFBIG))

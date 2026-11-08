@@ -33,6 +33,27 @@ function testcase.decode_accepts_padded_first_boundary_at_every_split()
     end
 end
 
+function testcase.decode_discards_newline_heavy_preamble_at_every_split()
+    for _, preamble in ipairs({
+        string.rep('\n', 64),
+        string.rep('\r\n', 32),
+        string.rep('x\n', 16) .. '--bgarbage\r\n--b \rX\n' ..
+            string.rep('\r\n', 16),
+    }) do
+        local input = preamble .. '--b\r\n' .. body
+        local form, err = multipart.decode(input, 'b', { maxsize = #input })
+        assert.is_nil(err)
+        assert.equal(form.foo[1].data, 'value')
+        for split = 1, #preamble + 5 do
+            form, err = multipart.decode(split_reader(input, split), 'b', {
+                maxsize = #input,
+            })
+            assert.is_nil(err)
+            assert.equal(form.foo[1].data, 'value')
+        end
+    end
+end
+
 function testcase.decode_rejects_padded_closing_first_boundary_at_every_split()
     for _, padding in ipairs({ '', ' ', '\t', ' \t \t ', string.rep(' \t', 32) }) do
         for _, newline in ipairs({ '\n', '\r\n' }) do

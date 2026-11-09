@@ -228,6 +228,10 @@ Content-Disposition: form-data; name="qux"\r\n
 
 Decode a string in `multipart/form-data` format.
 
+For interoperability with common encoders, a well-formed closing boundary
+without any parts is accepted as an empty form. This includes the output
+of `encode({}, boundary)`.
+
 The positional form supports the arguments available in v0.4.0:
 
 ```lua

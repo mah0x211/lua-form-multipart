@@ -55,15 +55,16 @@ function testcase.decode_discards_newline_heavy_preamble_at_every_split()
     end
 end
 
-function testcase.decode_rejects_padded_closing_first_boundary_at_every_split()
+function testcase.decode_accepts_padded_closing_first_boundary_at_every_split()
     for _, padding in ipairs({ '', ' ', '\t', ' \t \t ', string.rep(' \t', 32) }) do
         for _, newline in ipairs({ '\n', '\r\n' }) do
             local first = '--b--' .. padding .. newline
             local input = first .. '--b\r\n' .. body
             for split = 1, #first do
                 local form, err = multipart.decode(split_reader(input, split), 'b')
-                assert.is_nil(form)
-                assert.match(tostring(err), 'end of boundary found, but boundary not started')
+                assert.is_nil(err)
+                assert.is_table(form)
+                assert.empty(form)
             end
         end
     end
@@ -212,7 +213,7 @@ end
 
 function testcase.decode_rejects_eof_during_preamble_and_boundary_reads()
     for _, input in ipairs({
-        '--', '--b', '--b-', '--b ', '--b\r', '--b \r', '--b-- ', string.rep('x', 16384),
+        '--', '--b', '--b-', '--b ', '--b\r', '--b \r', string.rep('x', 16384),
     }) do
         local form, err = multipart.decode(split_reader(input, #input - 1), 'b')
         assert.is_nil(form)
@@ -235,7 +236,7 @@ function testcase.decode_discards_invalid_first_boundary_terminators()
     end
 end
 
-function testcase.decode_rejects_complete_closing_first_boundary_without_reading_more()
+function testcase.decode_preserves_reader_errors_after_closing_first_boundary()
     for _, newline in ipairs({ '\n', '\r\n' }) do
         local cause = errno.EIO:new('read beyond closing first boundary')
         local calls = 0
@@ -249,9 +250,8 @@ function testcase.decode_rejects_complete_closing_first_boundary_without_reading
         local form, err = multipart.decode(source, 'b')
         assert.is_nil(form)
         assert.equal(errlib.typeof(err), multipart.EDECODE)
-        assert.not_nil(errlib.is(err, errno.EINVAL))
-        assert.match(tostring(err), 'end of boundary found, but boundary not started')
-        assert.equal(calls, 1)
+        assert.is_true(errlib.unwrap(err) == cause)
+        assert.equal(calls, 2)
     end
 end
 

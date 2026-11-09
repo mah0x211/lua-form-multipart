@@ -30,7 +30,7 @@ end
 function testcase.decode_classifies_invalid_input_as_einval()
     for _, input in ipairs({
         '',
-        '--b--\r\n',
+        '--b--X\r\n',
         '--b\r\ninvalid-header\r\n\r\n',
         '--b\r\nContent-Type: text/plain\r\n\r\nx\r\n--b--',
         header .. 'value',

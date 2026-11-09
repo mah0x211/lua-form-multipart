@@ -98,10 +98,11 @@ function testcase.decode_rejects_invalid_headers_and_missing_names()
     assert.match(tostring(err), 'does not contain a name parameter')
 end
 
-function testcase.decode_rejects_close_delimiter_before_first_part()
+function testcase.decode_accepts_close_delimiter_as_an_empty_form()
     local form, err = multipart.decode('--b--\r\n', 'b')
-    assert.is_nil(form)
-    assert.match(tostring(err), 'end of boundary found, but boundary not started')
+    assert.is_nil(err)
+    assert.is_table(form)
+    assert.empty(form)
 end
 
 function testcase.decode_reports_unavailable_temporary_directory()

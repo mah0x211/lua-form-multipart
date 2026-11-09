@@ -214,7 +214,7 @@ function testcase.decode_preserves_reader_failures_with_a_size_budget()
 end
 
 function testcase.decode_does_not_replace_syntax_errors_with_budget_errors()
-    for _, input in ipairs({ header .. 'unfinished', '--b--\r\n' }) do
+    for _, input in ipairs({ header .. 'unfinished', '--b--X\r\n' }) do
         for _, source in ipairs({ input, reader(input) }) do
             local form, err = multipart.decode(source, 'b', {
                 chunksize = 2, maxsize = #input,

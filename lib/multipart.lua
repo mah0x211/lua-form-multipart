@@ -1044,6 +1044,7 @@ end
 --- @return boolean ok
 --- @return any err
 --- @return boolean? timeout
+--- @return boolean? closing True when the first boundary closes an empty form.
 local function discard_preamble(ctx)
     local buf = ctx.buf
     local delimiter = ctx.delimiter
@@ -1070,13 +1071,9 @@ local function discard_preamble(ctx)
 
             ctx.buf = buf
             local ok, err, timeout, invalid, nextpos =
-                skip_terminator(ctx, false, pos)
+                skip_terminator(ctx, closing, pos)
             if ok then
-                if closing then
-                    return false, new_errno('EINVAL',
-                                            'end of boundary found, but boundary not started')
-                end
-                return true
+                return true, nil, nil, closing
             elseif not invalid then
                 return false, err, timeout
             end
@@ -1139,9 +1136,11 @@ end
 local function decode_form(ctx, form)
     local maxfilesize = ctx.maxfilesize
     local filewriter = ctx.writer
-    local ok, err, timeout = discard_preamble(ctx)
+    local ok, err, timeout, closing = discard_preamble(ctx)
     if not ok then
         return false, err, timeout
+    elseif closing then
+        return discard_epilogue(ctx)
     end
 
     -- setup body writer

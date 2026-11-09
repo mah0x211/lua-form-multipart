@@ -48,6 +48,7 @@ local new_errno = require('errno').new
 local new_error_type = require('error').type.new
 -- constants
 local MAX_HEADERS_SIZE = 16384
+local DEFAULT_MAX_SIZE = 128 * 1024
 local DEFAULT_MAX_PARTS = 1000
 local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 
@@ -1247,12 +1248,15 @@ local function checkopts(has_reader, ...)
     local narg = select('#', ...)
     local filetmpl, maxfilesize, chunksize = ...
     local opts = filetmpl
+    local noopts = false
     if narg > 1 or type(filetmpl) ~= 'table' then
         opts = {
             filetmpl = filetmpl,
             maxfilesize = maxfilesize,
             chunksize = chunksize,
         }
+        -- Mark that no options table was provided, so positional arguments are used.
+        noopts = true
     end
 
     -- validate the following options:
@@ -1291,12 +1295,15 @@ local function checkopts(has_reader, ...)
     end
 
     local maxsize = opts.maxsize
-    if maxsize ~= nil then
-        if not is_int(maxsize) then
-            error('maxsize must be integer', 3)
-        elseif maxsize < 0 then
-            maxsize = 0
-        end
+    if noopts then
+        -- Positional calls retain an unlimited total size.
+        maxsize = huge
+    elseif maxsize == nil then
+        maxsize = DEFAULT_MAX_SIZE
+    elseif not is_int(maxsize) then
+        error('maxsize must be integer', 3)
+    elseif maxsize < 0 then
+        maxsize = 0
     end
 
     local maxparts = opts.maxparts
@@ -1319,7 +1326,7 @@ local function checkopts(has_reader, ...)
         filetmpl = filetmpl,
         maxfilesize = maxfilesize,
         chunksize = chunksize,
-        maxsize = maxsize or huge,
+        maxsize = maxsize,
         maxparts = maxparts,
         writer = writer,
     }

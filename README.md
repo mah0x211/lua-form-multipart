@@ -30,6 +30,12 @@ invalid boundary arguments before processing the form.
 Original causes and available errno information are retained; string errors
 without an errno remain untyped causes. Invalid top-level arguments raise exceptions.
 
+On standard Lua 5.1, processing allows coroutine yields by leaving exceptions
+unprotected: raised errors propagate to the caller, and files owned by the
+module are cleaned up during garbage collection. Returned failures still
+perform immediate cleanup. Lua 5.2 and later, and LuaJIT, also convert raised
+errors into the error results described above and perform immediate cleanup.
+
 Invalid part fields or malformed multipart data have an `errno.EINVAL` cause.
 Exceeding `maxfilesize` or `maxsize` has an `errno.EFBIG` cause.
 Exceeding `maxparts` has an `errno.E2BIG` cause.

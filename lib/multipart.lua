@@ -49,6 +49,18 @@ local new_error_type = require('error').type.new
 -- constants
 local MAX_HEADERS_SIZE = 16384
 local DEFAULT_MAX_PARTS = 1000
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
+
+-- Stock Lua 5.1 cannot yield across pcall. Keep the real pcall for validation.
+local function unsecure_pcall(fn, ...)
+    return true, fn(...)
+end
+
+local protected_call = pcall
+if IS_LUA51 then
+    protected_call = unsecure_pcall
+end
+
 local EENCODE = new_error_type('form.multipart.encode', nil,
                                'form-multipart encode error')
 local EDECODE = new_error_type('form.multipart.decode', nil,
@@ -268,13 +280,14 @@ local VALID_DATATYPE = {
 }
 
 --- close_tmpfile
---- @param ctx table
-local function close_tmpfile(ctx)
-    if ctx.tmpfile then
-        if file_type(ctx.tmpfile) == 'file' then
-            ctx.tmpfile:close()
+--- @param filectx table
+local function close_tmpfile(filectx)
+    local file = filectx.file
+    if file then
+        if file_type(file) == 'file' then
+            file:close()
         end
-        ctx.tmpfile = nil
+        filectx.file = nil
     end
 end
 
@@ -333,7 +346,7 @@ local function encode_form(ctx, form)
                                                part.pathname, name),
                                            new_errno(errnum, err, 'open'))
                             end
-                            ctx.tmpfile = tmpfile
+                            ctx.filectx.file = tmpfile
                             -- Keep library-owned handles out of reusable input.
                             local file_part = {}
                             for key, value in pairs(part) do
@@ -346,7 +359,7 @@ local function encode_form(ctx, form)
                             file_part.is_tmpfile = true
                             n, err = encode_part(ctx, name, file_part,
                                                  encode_part_file)
-                            close_tmpfile(ctx)
+                            close_tmpfile(ctx.filectx)
                         end
                     elseif not is_file(part.file) then
                         -- invalid file field
@@ -497,13 +510,23 @@ local function encode(form, boundary, writer)
 
     local ctx = {
         writer = writer,
+        filectx = {},
         delimiter = '--' .. boundary .. '\r\n',
         close_delimiter = '--' .. boundary .. '--',
     }
 
+    local gco
+    if IS_LUA51 then
+        -- Do not retain the writer or its coroutine through the GC callback.
+        gco = gcfn(close_tmpfile, ctx.filectx)
+    end
+
     local res
-    ok, res, err = pcall(encode_form, ctx, form)
-    close_tmpfile(ctx)
+    ok, res, err = protected_call(encode_form, ctx, form)
+    close_tmpfile(ctx.filectx)
+    if gco then
+        gco:disable()
+    end
 
     if not ok then
         return nil, EENCODE:new(nil, toerror(res))
@@ -1038,7 +1061,9 @@ local function discard_form(form)
     for _, parts in pairs(form) do
         for _, part in ipairs(parts) do
             if part.file then
-                part.file:close()
+                if file_type(part.file) == 'file' then
+                    part.file:close()
+                end
                 if part.pathname then
                     remove(part.pathname)
                 end
@@ -1166,9 +1191,13 @@ local function decode(chunk, boundary, ...)
         buf = '',
     }
     local form = {}
+    local gco
+    if IS_LUA51 then
+        gco = gcfn(discard_form, form)
+    end
 
     -- parse multipart/form-data
-    local ok, res, err = pcall(function()
+    local ok, res, err = protected_call(function()
         local ok, err = discard_preamble(ctx)
         if not ok then
             return false, err
@@ -1250,12 +1279,16 @@ local function decode(chunk, boundary, ...)
         return true
     end)
 
-    -- failed to parse
-    if not ok then
+    if not ok or not res then
         discard_form(form)
+    end
+    if gco then
+        gco:disable()
+    end
+
+    if not ok then
         return nil, EDECODE:new(nil, toerror(res))
     elseif not res then
-        discard_form(form)
         return nil, EDECODE:new(nil, toerror(err))
     end
     return form

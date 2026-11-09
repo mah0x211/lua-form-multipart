@@ -148,17 +148,18 @@ function testcase.encode_writer_timeout_after_yield_is_returned_to_caller()
     assert.equal(io.type(file), 'file')
 end
 
-function testcase.encode_counts_successful_short_writes_without_retrying()
-    local calls = 0
+function testcase.encode_counts_complete_writes_without_retrying()
+    local calls, total = 0, 0
     local n, err, timeout = multipart.encode(text_form(), 'b', {
-        write = function()
+        write = function(_, s)
             calls = calls + 1
-            return calls == 1 and 0 or 1, nil, false
+            total = total + #s
+            return #s, nil, false
         end,
         writefile = function() error('not a file part') end,
     })
     assert.equal(calls, 6)
-    assert.equal(n, 5)
+    assert.equal(n, total)
     assert.is_nil(err)
     assert.is_nil(timeout)
 end

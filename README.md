@@ -100,6 +100,11 @@ encode a form table to string in `multipart/form-data` format.
     - part:table: a file data that contains the `filename` and `file` fields. if `part.is_tmpfile` is `true`, `file` must be closed by this method.
     ```
 
+Successful writes must return exactly `#s` from `write` and `len` from
+`writefile`, including zero for empty data. A different count without an error
+or timeout stops encoding with `EENCODE` and an `errno.EIO` cause. The encoder
+does not retry incomplete writes.
+
 Files are encoded from their current position to the end of the file. Seek to
 position zero before calling `encode` to include the whole file. Custom
 writers receive that position as `offset` and the remaining length as `len`;

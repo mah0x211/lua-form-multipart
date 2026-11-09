@@ -161,6 +161,22 @@ local function check_timeout(timeout, method)
     end
 end
 
+--- Validate a write result, preserving the writer's error/timeout first.
+--- @param n integer?
+--- @param err any
+--- @param timeout boolean?
+--- @param expected integer
+--- @param method string
+--- @return any err
+local function check_write_result(n, err, timeout, expected, method)
+    check_timeout(timeout, method)
+    if not n or err or timeout then
+        return err
+    elseif n ~= expected then
+        return new_errno('EIO', method .. ' returned an unexpected byte count')
+    end
+end
+
 --- encode_part_file
 --- @param ctx table
 --- @param name string
@@ -178,7 +194,7 @@ local function encode_part_file(ctx, name, part)
                   'Content-Disposition: form-data; name=%q; filename=%q\r\n\r\n',
                   name, part.filename)
     local n, err, timeout = writer:write(s)
-    check_timeout(timeout, 'writer.write')
+    err = check_write_result(n, err, timeout, #s, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
     end
@@ -195,7 +211,7 @@ local function encode_part_file(ctx, name, part)
     end
     seek_file(file, 'set', offset)
     n, err, timeout = writer:writefile(file, len, offset, part)
-    check_timeout(timeout, 'writer.writefile')
+    err = check_write_result(n, err, timeout, len, 'writer.writefile')
     if not n or err or timeout then
         return nil, err, timeout
     end
@@ -217,7 +233,7 @@ local function encode_part_data(ctx, name, part)
     -- write content-disposition header
     local s = format('Content-Disposition: form-data; name=%q\r\n\r\n', name)
     local n, err, timeout = writer:write(s)
-    check_timeout(timeout, 'writer.write')
+    err = check_write_result(n, err, timeout, #s, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
     end
@@ -229,7 +245,7 @@ local function encode_part_data(ctx, name, part)
 
     -- write data
     n, err, timeout = writer:write(data)
-    check_timeout(timeout, 'writer.write')
+    err = check_write_result(n, err, timeout, #data, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
     end
@@ -251,7 +267,7 @@ local function encode_part(ctx, name, part, encode_body)
 
     -- write delimiter
     local n, err, timeout = writer:write(delimiter)
-    check_timeout(timeout, 'writer.write')
+    err = check_write_result(n, err, timeout, #delimiter, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
     end
@@ -275,7 +291,7 @@ local function encode_part(ctx, name, part, encode_body)
                     end
                     local s = format('%s: %s\r\n', key, value)
                     n, err, timeout = writer:write(s)
-                    check_timeout(timeout, 'writer.write')
+                    err = check_write_result(n, err, timeout, #s, 'writer.write')
                     if not n or err or timeout then
                         return nil, err, timeout
                     end
@@ -294,7 +310,7 @@ local function encode_part(ctx, name, part, encode_body)
 
     -- write CRLF
     n, err, timeout = writer:write('\r\n')
-    check_timeout(timeout, 'writer.write')
+    err = check_write_result(n, err, timeout, 2, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
     end
@@ -413,7 +429,8 @@ local function encode_form(ctx, form)
 
     -- write close-delimiter
     local n, err, timeout = ctx.writer:write(ctx.close_delimiter)
-    check_timeout(timeout, 'writer.write')
+    err = check_write_result(n, err, timeout, #ctx.close_delimiter,
+                             'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
     end

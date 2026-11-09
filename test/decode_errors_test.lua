@@ -114,7 +114,7 @@ function testcase.decode_argument_contract_violations_still_raise()
         { 42, 'b' },
         { body, '' },
         { body, 'b', 42 },
-        { body, 'b', nil, -1 },
+        { body, 'b', nil, -1.5 },
         { reader_for({ body }), 'b', nil, nil, 0 },
     }) do
         local ok, err = pcall(multipart.decode, args[1], args[2], args[3], args[4], args[5])

@@ -36,8 +36,8 @@ function testcase.decode_options_defaults_and_legacy_nil_arguments()
     for _, args in ipairs({
         { n = 0 },
         { n = 1 },
-        { n = 4 },
-        { n = 4, [4] = #body },
+        { n = 3 },
+        { n = 3, [3] = 7 },
         { n = 1, opts },
     }) do
         for _, source in ipairs({ body, reader(body) }) do
@@ -47,6 +47,17 @@ function testcase.decode_options_defaults_and_legacy_nil_arguments()
         end
     end
     assert.empty(opts)
+end
+
+function testcase.decode_ignores_arguments_after_legacy_chunksize()
+    for _, extra in ipairs({ 0, false, 'invalid', {}, -1 }) do
+        for _, source in ipairs({ body, reader(body) }) do
+            local form, err = multipart.decode(source, 'b', nil, nil, 3,
+                                              extra, { maxsize = 0 })
+            assert.is_nil(err)
+            assert.equal(form.text[1].data, 'value')
+        end
+    end
 end
 
 function testcase.decode_options_preserves_file_settings_without_mutation()
@@ -130,9 +141,9 @@ end
 function testcase.decode_options_invalid_values_raise_before_reading()
     for _, case in ipairs({
         { opts = { filetmpl = false }, message = 'filetmpl must be string' },
-        { opts = { maxfilesize = -1 }, message = 'maxfilesize must be uint' },
+        { opts = { maxfilesize = -1.5 }, message = 'maxfilesize must be integer' },
         { opts = { chunksize = 0 }, message = 'chunksize must be positive integer' },
-        { opts = { maxsize = '1' }, message = 'maxsize must be uint' },
+        { opts = { maxsize = '1' }, message = 'maxsize must be integer' },
     }) do
         local calls = 0
         local source = { read = function() calls = calls + 1 end }

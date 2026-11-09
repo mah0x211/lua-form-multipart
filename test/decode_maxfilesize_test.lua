@@ -1,7 +1,10 @@
 local testcase = require('testcase')
 local assert = require('assert')
+local errlib = require('error')
+local errno = require('errno')
 local mkstemp = require('mkstemp')
 local multipart = require('form.multipart')
+local unpack = table.unpack or unpack
 local files = {}
 
 local function prefix()
@@ -69,6 +72,53 @@ function testcase.decode_file_limit_is_independent_of_reader_chunks()
                 remember_files(form)
                 assert.equal(form.file[1].file:read('*a'), payload)
             end
+        end
+    end
+end
+
+function testcase.decode_negative_file_limits_allow_only_empty_files()
+    local input = file_body('b', '')
+    for _, limit in ipairs({ -1, -100 }) do
+        local opts = { filetmpl = prefix(), maxfilesize = limit, chunksize = 2 }
+        for _, args in ipairs({ { n = 1, opts }, { n = 3, prefix(), limit, 2 } }) do
+            for _, source in ipairs({ input, reader(input) }) do
+                local form, err = multipart.decode(source, 'b', unpack(args, 1, args.n))
+                assert.is_nil(err)
+                remember_files(form)
+                assert.equal(form.file[1].file:read('*a'), '')
+            end
+        end
+        assert.equal(opts.maxfilesize, limit)
+    end
+end
+
+function testcase.decode_negative_file_limits_reject_nonempty_files()
+    local input = file_body('b', 'x')
+    for _, limit in ipairs({ -1, -100 }) do
+        local opts = { filetmpl = prefix(), maxfilesize = limit, chunksize = 2 }
+        for _, args in ipairs({ { n = 1, opts }, { n = 3, prefix(), limit, 2 } }) do
+            for _, source in ipairs({ input, reader(input) }) do
+                local form, err = multipart.decode(source, 'b', unpack(args, 1, args.n))
+                assert.is_nil(form)
+                assert.equal(errlib.typeof(err), multipart.EDECODE)
+                assert.not_nil(errlib.is(err, errno.EFBIG))
+                assert.match(tostring(err), 'multipart body too large')
+            end
+        end
+        assert.equal(opts.maxfilesize, limit)
+    end
+end
+
+function testcase.decode_negative_file_limits_do_not_limit_text()
+    local input = '--b\r\nContent-Disposition: form-data; name="text"\r\n\r\n' ..
+        'value\r\n--b--'
+    for _, limit in ipairs({ -1, -100 }) do
+        for _, source in ipairs({ input, reader(input) }) do
+            local form, err = multipart.decode(source, 'b', {
+                maxfilesize = limit, chunksize = 2,
+            })
+            assert.is_nil(err)
+            assert.equal(form.text[1].data, 'value')
         end
     end
 end

@@ -196,7 +196,7 @@ function testcase.decode_counts_discarded_preamble_toward_total_size_limit()
             if #chunk > 0 then return chunk end
         end,
     }
-    local form, err = multipart.decode(source, 'b', nil, nil, 1024, 8192)
+    local form, err = multipart.decode(source, 'b', { chunksize = 1024, maxsize = 8192 })
     assert.is_nil(form)
     assert.equal(errlib.typeof(err), multipart.EDECODE)
     assert.not_nil(errlib.is(err, errno.EFBIG))

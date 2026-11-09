@@ -211,14 +211,14 @@ function testcase.decode_accepts_file_and_indexed_reader_objects_at_eof()
     sources[#sources + 1] = file
     assert(file:write(body .. ' \t'))
     assert(file:seek('set'))
-    local form, err = multipart.decode(file, 'b', nil, nil, 3, #body + 2)
+    local form, err = multipart.decode(file, 'b', { chunksize = 3, maxsize = #body + 2 })
     assert.is_nil(err)
     assert.equal(form.foo[1].data, 'value')
     assert.equal(io.type(file), 'file')
 
     local source = reader(body)
     source[1] = 'reader metadata'
-    form, err = multipart.decode(source, 'b', nil, nil, 3, #body)
+    form, err = multipart.decode(source, 'b', { chunksize = 3, maxsize = #body })
     assert.is_nil(err)
     assert.equal(form.foo[1].data, 'value')
     assert.equal(source[1], 'reader metadata')

@@ -65,14 +65,18 @@ end
 
 function testcase.decode_total_and_file_limits_are_independent()
     for _, source in ipairs({ input, reader(input) }) do
-        local form, err = multipart.decode(source, 'b', unused_prefix(), 3, 3, #input)
+        local form, err = multipart.decode(source, 'b', {
+            filetmpl = unused_prefix(), maxfilesize = 3, chunksize = 3, maxsize = #input,
+        })
         assert.is_nil(err)
         for _, part in ipairs(form.upload) do files[#files + 1] = part.file end
         assert.equal(form.upload[1].file:read('*a'), 'abc')
         assert.equal(form.upload[2].file:read('*a'), 'def')
     end
     local prefix = unused_prefix()
-    local form, err = multipart.decode(reader(input), 'b', prefix, 2, 3, #input)
+    local form, err = multipart.decode(reader(input), 'b', {
+        filetmpl = prefix, maxfilesize = 2, chunksize = 3, maxsize = #input,
+    })
     assert.is_nil(form)
     assert.not_nil(errlib.is(err, errno.EFBIG))
     assert.match(tostring(err), 'multipart body too large')
@@ -94,7 +98,9 @@ function testcase.decode_cleans_completed_and_incomplete_files_on_total_limit()
                 if #s > 0 then return s end
             end,
         }
-        local form, err = multipart.decode(source, 'b', prefix, nil, 1, maxsize)
+        local form, err = multipart.decode(source, 'b', {
+            filetmpl = prefix, chunksize = 1, maxsize = maxsize,
+        })
         assert.is_nil(form)
         assert.equal(errlib.typeof(err), multipart.EDECODE)
         assert.not_nil(errlib.is(err, errno.EFBIG))
@@ -107,7 +113,9 @@ end
 
 function testcase.decode_rejects_whole_string_before_creating_upload_files()
     local prefix = unused_prefix()
-    local form, err = multipart.decode(input, 'b', prefix, nil, nil, #input - 1)
+    local form, err = multipart.decode(input, 'b', {
+        filetmpl = prefix, maxsize = #input - 1,
+    })
     assert.is_nil(form)
     assert.not_nil(errlib.is(err, errno.EFBIG))
     assert.match(tostring(err), 'maxsize')

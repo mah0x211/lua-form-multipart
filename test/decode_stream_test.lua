@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local mkstemp = require('mkstemp')
@@ -175,9 +176,16 @@ function testcase.decode_handles_reader_exceptions_after_completed_files()
             error('reader raised')
         end,
     }
-    local form, err = multipart.decode(reader, 'b', prefix)
-    assert.is_nil(form)
-    assert.match(tostring(err), 'reader raised')
+    local ok, form, err = pcall(multipart.decode, reader, 'b', prefix)
+    if IS_LUA51 then
+        assert.is_false(ok)
+        assert.match(tostring(form), 'reader raised')
+        collectgarbage('collect')
+    else
+        assert.is_true(ok)
+        assert.is_nil(form)
+        assert.match(tostring(err), 'reader raised')
+    end
     assert.empty(files_with_prefix(prefix))
 end
 

@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local mkstemp = require('mkstemp')
@@ -66,15 +67,22 @@ end
 function testcase.encode_pathname_form_is_reusable_after_writer_errors()
     for _, mode in ipairs({ 'return', 'raise' }) do
         local part = { filename = 'x.txt', pathname = pathname }
-        local result, err = multipart.encode({ foo = { part } }, 'b', {
+        local ok, result, err = pcall(multipart.encode, { foo = { part } }, 'b', {
             write = function()
                 if mode == 'raise' then error('write failed') end
                 return nil, 'write failed'
             end,
             writefile = function() error('must not be reached') end,
         })
-        assert.is_nil(result)
-        assert.match(tostring(err), 'write failed')
+        if IS_LUA51 and mode == 'raise' then
+            assert.is_false(ok)
+            assert.match(tostring(result), 'write failed')
+            collectgarbage('collect')
+        else
+            assert.is_true(ok)
+            assert.is_nil(result)
+            assert.match(tostring(err), 'write failed')
+        end
         assert.equal(part, { filename = 'x.txt', pathname = pathname })
         local encoded = assert(multipart.encode({ foo = { part } }, 'b'))
         assert.match(encoded, 'content')

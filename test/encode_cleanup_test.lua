@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local mkstemp = require('mkstemp')
@@ -57,7 +58,7 @@ function testcase.encode_pathname_writefile_errors_close_owned_handles()
     for _, mode in ipairs({ "return", "raise", "close_then_raise" }) do
         local captured
         local part = { filename = 'x.txt', pathname = pathname }
-        local result, err = multipart.encode({ foo = { part } }, 'b', {
+        local ok, result, err = pcall(multipart.encode, { foo = { part } }, 'b', {
             write = function(_, s) return #s end,
             writefile = function(_, file)
                 captured = file
@@ -66,10 +67,17 @@ function testcase.encode_pathname_writefile_errors_close_owned_handles()
                 return nil, 'file write failed'
             end,
         })
+        if IS_LUA51 and mode ~= "return" then
+            assert.is_false(ok)
+            assert.match(tostring(result), 'file write failed')
+            collectgarbage('collect')
+        else
+            assert.is_true(ok)
+            assert.is_nil(result)
+            assert.match(tostring(err), 'file write failed')
+        end
         local state = io.type(captured)
         if state == 'file' then captured:close() end
-        assert.is_nil(result)
-        assert.match(tostring(err), 'file write failed')
         assert.equal(state, 'closed file')
     end
 end

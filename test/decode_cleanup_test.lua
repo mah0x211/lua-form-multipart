@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local mkstemp = require('mkstemp')
@@ -58,9 +59,17 @@ function testcase.decode_removes_incomplete_file_on_reader_failure()
                 return nil, 'reader failed'
             end,
         }
-        local form, err = multipart.decode(reader, 'b', prefix)
-        assert.is_nil(form)
-        assert.match(tostring(err), 'reader failed')
+        local ok, form, err = pcall(multipart.decode, reader, 'b', prefix)
+        if IS_LUA51 and raises then
+            assert.is_false(ok)
+            assert.match(tostring(form), 'reader failed')
+            assert.not_empty(files_with_prefix(prefix))
+            collectgarbage('collect')
+        else
+            assert.is_true(ok)
+            assert.is_nil(form)
+            assert.match(tostring(err), 'reader failed')
+        end
         assert.empty(files_with_prefix(prefix))
     end
 end

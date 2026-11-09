@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local errlib = require('error')
@@ -103,10 +104,15 @@ function testcase.decode_preserves_raised_reader_error_objects()
     local ok, form, err = pcall(multipart.decode, {
         read = function() error(cause, 0) end,
     }, 'b')
-    assert.is_true(ok)
-    assert.is_nil(form)
-    assert_decode_error(err, errno.EIO)
-    assert.is_true(errlib.unwrap(err) == cause)
+    if IS_LUA51 then
+        assert.is_false(ok)
+        assert.is_true(form == cause)
+    else
+        assert.is_true(ok)
+        assert.is_nil(form)
+        assert_decode_error(err, errno.EIO)
+        assert.is_true(errlib.unwrap(err) == cause)
+    end
 end
 
 function testcase.decode_argument_contract_violations_still_raise()
@@ -124,11 +130,17 @@ function testcase.decode_argument_contract_violations_still_raise()
 end
 
 function testcase.decode_preserves_raised_string_reader_errors()
-    local form, err = multipart.decode({
+    local ok, form, err = pcall(multipart.decode, {
         read = function() error('reader stopped', 0) end,
     }, 'b')
-    assert.is_nil(form)
-    assert.equal(errlib.typeof(err), multipart.EDECODE)
-    assert.not_nil(multipart.EDECODE)
-    assert.equal(tostring(errlib.unwrap(err).message), 'reader stopped')
+    if IS_LUA51 then
+        assert.is_false(ok)
+        assert.equal(form, 'reader stopped')
+    else
+        assert.is_true(ok)
+        assert.is_nil(form)
+        assert.equal(errlib.typeof(err), multipart.EDECODE)
+        assert.not_nil(multipart.EDECODE)
+        assert.equal(tostring(errlib.unwrap(err).message), 'reader stopped')
+    end
 end

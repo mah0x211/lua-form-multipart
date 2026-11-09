@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local errlib = require('error')
@@ -131,10 +132,16 @@ function testcase.decode_options_preserves_reader_errors()
                 return nil, cause
             end,
         }
-        local form, err = multipart.decode(source, 'b', { maxsize = #body })
-        assert.is_nil(form)
-        assert.equal(errlib.typeof(err), multipart.EDECODE)
-        assert.is_true(errlib.unwrap(err) == cause)
+        local ok, form, err = pcall(multipart.decode, source, 'b', { maxsize = #body })
+        if IS_LUA51 and raises then
+            assert.is_false(ok)
+            assert.is_true(form == cause)
+        else
+            assert.is_true(ok)
+            assert.is_nil(form)
+            assert.equal(errlib.typeof(err), multipart.EDECODE)
+            assert.is_true(errlib.unwrap(err) == cause)
+        end
     end
 end
 

@@ -1,3 +1,4 @@
+local IS_LUA51 = _VERSION == 'Lua 5.1' and not _G.jit
 local testcase = require('testcase')
 local assert = require('assert')
 local errlib = require('error')
@@ -231,10 +232,17 @@ function testcase.decode_cleans_streamed_file_on_reader_failure()
                 return nil, cause
             end,
         }
-        local form, err = multipart.decode(source, 'b', prefix)
-        assert.is_nil(form)
-        assert.equal(errlib.typeof(err), multipart.EDECODE)
-        assert.is_true(errlib.unwrap(err) == cause)
+        local ok, form, err = pcall(multipart.decode, source, 'b', prefix)
+        if IS_LUA51 and raises then
+            assert.is_false(ok)
+            assert.is_true(form == cause)
+        else
+            assert.is_true(ok)
+            assert.is_nil(form)
+            assert.equal(errlib.typeof(err), multipart.EDECODE)
+            assert.is_true(errlib.unwrap(err) == cause)
+        end
+        if IS_LUA51 and raises then collectgarbage('collect') end
         assert.greater(saved_before_error, 32768)
         assert.empty(files_with_prefix(prefix))
     end

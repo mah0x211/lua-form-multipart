@@ -264,7 +264,15 @@ local function encode_part(ctx, name, part, encode_body)
             if type(vals) == 'table' and type(key) == 'string' and #key > 0 and
                 not find(key, '%s') then
                 for _, v in ipairs(vals) do
-                    local s = format('%s: %s\r\n', key, tostring(v))
+                    local value = tostring(v)
+                    -- RFC 5322 section 2.2.3: only CRLF followed by SP/HTAB
+                    -- may appear as a folded header line.
+                    if find(gsub(value, '\r\n[ \t]', ''), '[\r\n]') then
+                        return nil, new_errno('EINVAL', format(
+                                                  'header %q contains an invalid line break',
+                                                  key))
+                    end
+                    local s = format('%s: %s\r\n', key, value)
                     n, err, timeout = writer:write(s)
                     check_timeout(timeout, 'writer.write')
                     if not n or err or timeout then

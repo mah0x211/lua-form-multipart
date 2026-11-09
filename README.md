@@ -76,6 +76,10 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
+    Part header values are converted with `tostring`. CRLF followed by SP/HTAB
+    is permitted as header folding; other CR/LF sequences return `EENCODE`
+    with an `errno.EINVAL` cause.
+
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
     ```

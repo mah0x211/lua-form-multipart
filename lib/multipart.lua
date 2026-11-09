@@ -570,6 +570,7 @@ end
 --- @param allow_eof? boolean
 --- @return string? str
 --- @return any err
+--- @return boolean? timeout
 local function read_chunk(ctx, allow_eof)
     local str
     if ctx.reader then
@@ -581,10 +582,16 @@ local function read_chunk(ctx, allow_eof)
         if remaining < chunksize then
             chunksize = remaining + 1
         end
-        local err
-        str, err = ctx.reader:read(chunksize)
-        if err then
-            return nil, err
+        local err, timeout
+        str, err, timeout = ctx.reader:read(chunksize)
+        -- Standard Lua files return a numeric errno in the third slot.
+        if type(timeout) == 'number' and file_type(ctx.reader) == 'file' then
+            err = new_errno(timeout, err, 'read')
+            timeout = nil
+        end
+        check_timeout(timeout, 'reader.read')
+        if err or timeout then
+            return nil, err, timeout
         end
     elseif ctx.chunk then
         -- consume chunk
@@ -612,6 +619,7 @@ end
 --- @param pos? integer Start position in ctx.buf; defaults to 1.
 --- @return boolean ok
 --- @return any err
+--- @return boolean? timeout
 --- @return boolean? invalid True for invalid syntax; resume at nextpos in ctx.buf.
 --- @return integer? nextpos Position to continue discarding an invalid line.
 local function skip_terminator(ctx, allow_eof, pos)
@@ -631,10 +639,10 @@ local function skip_terminator(ctx, allow_eof, pos)
         end
 
         -- Need more data to determine whether padding continues.
-        local chunk, err = read_chunk(ctx, allow_eof)
+        local chunk, err, timeout = read_chunk(ctx, allow_eof)
         if not chunk then
-            if err then
-                return false, err
+            if err or timeout then
+                return false, err, timeout
             end
             -- EOF is final; epilogue discard must not read the source again.
             ctx.reader = nil
@@ -651,9 +659,9 @@ local function skip_terminator(ctx, allow_eof, pos)
     local c = sub(buf, pos, pos)
     if c == '\r' then
         if pos == #buf then
-            local chunk, err = read_chunk(ctx)
+            local chunk, err, timeout = read_chunk(ctx)
             if not chunk then
-                return false, err
+                return false, err, timeout
             end
             -- Only the pending CR is needed from the preceding buffer.
             buf = '\r' .. chunk
@@ -667,7 +675,7 @@ local function skip_terminator(ctx, allow_eof, pos)
         ctx.buf = buf
         return false,
                new_errno('EINVAL', 'invalid multipart boundary terminator'),
-               true, pos
+               nil, true, pos
     end
 
     -- Discard the line ending and the consumed prefix once.
@@ -680,6 +688,7 @@ end
 --- @param writer function
 --- @return boolean ok
 --- @return any err
+--- @return boolean? timeout
 --- @return boolean? again
 local function decode_body(ctx, writer)
     local buf = ctx.buf
@@ -707,9 +716,9 @@ local function decode_body(ctx, writer)
                 end
 
                 -- use the data before the line-feeds as body data
-                local ok, err = writer(sub(buf, 1, head - 1))
-                if not ok then
-                    return false, err
+                local ok, err, timeout = writer(sub(buf, 1, head - 1))
+                if not ok or err or timeout then
+                    return false, err, timeout
                 end
                 -- skip data and delimiter
                 buf = sub(buf, tail + delimlen + 1)
@@ -717,17 +726,17 @@ local function decode_body(ctx, writer)
                 -- found close_delimiter
                 if sub(buf, 1, 2) == '--' then
                     ctx.buf = sub(buf, 3)
-                    ok, err = skip_terminator(ctx, true)
-                    return ok, err
+                    ok, err, timeout = skip_terminator(ctx, true)
+                    return ok, err, timeout
                 end
                 ctx.buf = buf
 
                 -- skip *LWSP CR?LF
-                ok, err = skip_terminator(ctx)
-                if not ok then
-                    return false, err
+                ok, err, timeout = skip_terminator(ctx)
+                if not ok or err or timeout then
+                    return false, err, timeout
                 end
-                return true, nil, true
+                return true, nil, nil, true
             end
 
             -- Advance over confirmed payload without copying the remaining
@@ -747,17 +756,17 @@ local function decode_body(ctx, writer)
                 return false, new_errno('EFBIG', 'multipart body too large')
             end
 
-            local ok, err = writer(sub(buf, 1, nbody))
-            if not ok then
-                return false, err
+            local ok, err, timeout = writer(sub(buf, 1, nbody))
+            if not ok or err or timeout then
+                return false, err, timeout
             end
             buf = sub(buf, nbody + 1)
         end
 
         -- read next chunk
-        local chunk, err = read_chunk(ctx)
+        local chunk, err, timeout = read_chunk(ctx)
         if not chunk then
-            return false, err
+            return false, err, timeout
         end
         buf = buf .. chunk
     end
@@ -870,6 +879,7 @@ end
 --- @param total_bytes integer Previously consumed header bytes in this part.
 --- @return string? line Raw field without its final line ending; empty ends headers.
 --- @return any err
+--- @return boolean? timeout
 --- @return integer? total_bytes Cumulative header bytes on success.
 local function consume_headerline(ctx, total_bytes)
     local buf = ctx.buf
@@ -900,10 +910,10 @@ local function consume_headerline(ctx, total_bytes)
 
         if head == 1 then
             ctx.buf = sub(buf, afterlf)
-            return '', nil, size
+            return '', nil, nil, size
         elseif head and tail < #buf then
             ctx.buf = sub(buf, tail + 1)
-            return sub(buf, 1, head - 1), nil, size
+            return sub(buf, 1, head - 1), nil, nil, size
         elseif head then
             -- Recheck this ending when continuation lookahead arrives.
             pos = head
@@ -912,9 +922,9 @@ local function consume_headerline(ctx, total_bytes)
             pos = #buf
         end
 
-        local chunk, err = read_chunk(ctx)
+        local chunk, err, timeout = read_chunk(ctx)
         if not chunk then
-            return nil, err
+            return nil, err, timeout
         end
         buf = buf .. chunk
     end
@@ -924,6 +934,7 @@ end
 --- @param ctx table
 --- @return table? part
 --- @return any err
+--- @return boolean? timeout
 local function decode_headers(ctx)
     local headers = {}
     local params = {} ---@type table?
@@ -931,10 +942,10 @@ local function decode_headers(ctx)
     local total_bytes = 0
 
     while true do
-        local line, err
-        line, err, total_bytes = consume_headerline(ctx, total_bytes)
+        local line, err, timeout
+        line, err, timeout, total_bytes = consume_headerline(ctx, total_bytes)
         if not line then
-            return nil, err
+            return nil, err, timeout
         elseif line == '' then
             return {
                 header = headers,
@@ -1007,13 +1018,14 @@ end
 ---@param ctx table
 ---@return boolean ok
 ---@return any err
+---@return boolean? timeout
 local function discard_epilogue(ctx)
     ctx.buf = nil
-    local s, err
+    local s, err, timeout
     repeat
-        s, err = read_chunk(ctx, true)
-        if err then
-            return false, err
+        s, err, timeout = read_chunk(ctx, true)
+        if err or timeout then
+            return false, err, timeout
         end
     until not s
     return true
@@ -1023,6 +1035,7 @@ end
 --- @param ctx table
 --- @return boolean ok
 --- @return any err
+--- @return boolean? timeout
 local function discard_preamble(ctx)
     local buf = ctx.buf
     local delimiter = ctx.delimiter
@@ -1032,9 +1045,9 @@ local function discard_preamble(ctx)
     while true do
         -- Read the boundary plus two bytes for the optional closing "--".
         while #buf - pos + 1 < delimlen + 2 do
-            local chunk, err = read_chunk(ctx)
+            local chunk, err, timeout = read_chunk(ctx)
             if not chunk then
-                return false, err
+                return false, err, timeout
             end
             buf = sub(buf, pos) .. chunk
             pos = 1
@@ -1048,7 +1061,7 @@ local function discard_preamble(ctx)
             end
 
             ctx.buf = buf
-            local ok, err, invalid, nextpos = skip_terminator(ctx, false, pos)
+            local ok, err, timeout, invalid, nextpos = skip_terminator(ctx, false, pos)
             if ok then
                 if closing then
                     return false, new_errno('EINVAL',
@@ -1056,7 +1069,7 @@ local function discard_preamble(ctx)
                 end
                 return true
             elseif not invalid then
-                return false, err
+                return false, err, timeout
             end
 
             -- An invalid terminator belongs to preamble text. Keep any
@@ -1072,10 +1085,10 @@ local function discard_preamble(ctx)
                 pos = head + 1
                 break
             end
-            local err
-            buf, err = read_chunk(ctx)
+            local err, timeout
+            buf, err, timeout = read_chunk(ctx)
             if not buf then
-                return false, err
+                return false, err, timeout
             end
             pos = 1
         end
@@ -1105,6 +1118,9 @@ local function gc_discard_form_file(pathname)
     remove(pathname)
 end
 
+--- @class form.multipart.decode_writer
+--- @field writefile fun(self, file:file*, s:string):(n:integer?,err:any,timeout:boolean?)
+
 --- Normalize and validate decode options without modifying caller-owned tables.
 --- @param has_reader boolean Whether chunksize is used by the input reader.
 --- @param ... table|string|integer|nil Options table or legacy positional arguments.
@@ -1113,6 +1129,7 @@ end
 --- @return any chunksize Validated only for reader input.
 --- @return integer? maxsize
 --- @return integer maxparts
+--- @return form.multipart.decode_writer? writer
 local function checkopts(has_reader, ...)
     local narg = select('#', ...)
     local filetmpl, maxfilesize, chunksize = ...
@@ -1131,6 +1148,7 @@ local function checkopts(has_reader, ...)
     --  chunksize: size of chunks to read from the input reader
     --  maxsize: maximum allowed size for the entire form
     --  maxparts: maximum number of parts allowed in the form
+    --  writer: optional file-body writer
 
     chunksize = opts.chunksize
     if has_reader then
@@ -1177,7 +1195,14 @@ local function checkopts(has_reader, ...)
         maxparts = 0
     end
 
-    return filetmpl, maxfilesize, chunksize, maxsize, maxparts
+    local writer = opts.writer
+    if writer ~= nil and not pcall(function()
+        assert(type(writer.writefile) == 'function')
+    end) then
+        error('writer.writefile must be function', 3)
+    end
+
+    return filetmpl, maxfilesize, chunksize, maxsize, maxparts, writer
 end
 
 --- decode
@@ -1186,6 +1211,7 @@ end
 --- @param ... table|string|integer|nil Options table or legacy filetmpl, maxfilesize, chunksize.
 --- @return table? form
 --- @return any err
+--- @return boolean? timeout
 local function decode(chunk, boundary, ...)
     local reader = chunk
     -- verify chunk
@@ -1204,7 +1230,7 @@ local function decode(chunk, boundary, ...)
     end
 
     -- check and retrieve options
-    local filetmpl, maxfilesize, chunksize, maxsize, maxparts = checkopts(
+    local filetmpl, maxfilesize, chunksize, maxsize, maxparts, filewriter = checkopts(
                                                                     reader ~=
                                                                         nil, ...)
     local ctx = {
@@ -1224,10 +1250,10 @@ local function decode(chunk, boundary, ...)
     end
 
     -- parse multipart/form-data
-    local ok, res, err = protected_call(function()
-        local ok, err = discard_preamble(ctx)
+    local ok, res, err, timeout = protected_call(function()
+        local ok, err, timeout = discard_preamble(ctx)
         if not ok then
-            return false, err
+            return false, err, timeout
         end
 
         -- setup body writer
@@ -1236,6 +1262,11 @@ local function decode(chunk, boundary, ...)
             if part_data then
                 part_data[#part_data + 1] = s
                 return true
+            end
+            if filewriter then
+                local n, write_err, write_timeout = filewriter:writefile(part_file, s)
+                check_timeout(write_timeout, 'writer.writefile')
+                return n, write_err, write_timeout
             end
             local result, write_err, errnum = part_file:write(s)
             -- Preserve the numeric errno returned by Lua for file-write errors.
@@ -1256,9 +1287,9 @@ local function decode(chunk, boundary, ...)
             nparts = nparts + 1
 
             local part
-            part, err = decode_headers(ctx)
+            part, err, timeout = decode_headers(ctx)
             if not part then
-                return false, err
+                return false, err, timeout
             elseif not part.name then
                 return false, new_errno('EINVAL',
                                         'Content-Disposition header does not contain a name parameter')
@@ -1283,25 +1314,27 @@ local function decode(chunk, boundary, ...)
                 end
                 part.gc = gcfn(gc_discard_form_file, part.pathname)
                 part_file = part.file
-                ok, err, again = decode_body(ctx, writer)
-                part_file:seek('set')
+                ok, err, timeout, again = decode_body(ctx, writer)
+                if ok then
+                    part_file:seek('set')
+                end
                 part_file = nil
             else
                 ctx.maxfilesize = nil
                 part_data = {}
-                ok, err, again = decode_body(ctx, writer)
+                ok, err, timeout, again = decode_body(ctx, writer)
                 part.data = concat(part_data)
                 part_data = nil
             end
 
             if not ok then
-                return false, err
+                return false, err, timeout
             end
         until not again
 
-        ok, err = discard_epilogue(ctx)
+        ok, err, timeout = discard_epilogue(ctx)
         if not ok then
-            return false, err
+            return false, err, timeout
         end
         return true
     end)
@@ -1316,7 +1349,10 @@ local function decode(chunk, boundary, ...)
     if not ok then
         return nil, EDECODE:new(nil, toerror(res))
     elseif not res then
-        return nil, EDECODE:new(nil, toerror(err))
+        if timeout and not err then
+            return nil, nil, timeout
+        end
+        return nil, EDECODE:new(nil, toerror(err)), timeout
     end
     return form
 end

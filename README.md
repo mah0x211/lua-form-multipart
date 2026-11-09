@@ -220,7 +220,7 @@ Content-Disposition: form-data; name="qux"\r\n
 ```
 
 
-## form, err = multipart.decode( chunk, boundary [, opts] )
+## form, err, timeout = multipart.decode( chunk, boundary [, opts] )
 
 Decode a string in `multipart/form-data` format.
 
@@ -246,9 +246,10 @@ independent of HTTP chunk boundaries.
 - `chunk:string|table|userdata`: a string in `multipart/form-data` format.
     -  if the `chunk` parameter is not string, it must have the `chunk.read` method.
         ```
-        s, err = chunk:read( n )
-        - s:string: a string in multipart/form-data format.
+        s, err, timeout = chunk:read( n )
+        - s:string|nil: a string in multipart/form-data format, or nil at EOF or on failure.
         - err:any: error value.
+        - timeout:boolean|nil: true if reading timed out.
         - n:integer: maximum number of bytes to read.
         ```
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
@@ -261,11 +262,29 @@ independent of HTTP chunk boundaries.
 - `chunksize:integer`: if `chunk` is not a string, the maximum number of bytes requested from `chunk.read` per call. This value must be greater than `0`. Requests may be smaller when `maxsize` is set. (default: `4096`)
 - `maxsize:integer`: maximum total bytes received, including the preamble, part headers, text and file data, boundaries, padding and epilogue. Must be an integer; negative values are treated as zero, and nil leaves the total unlimited. Exactly the limit is allowed. This limit is independent of `maxfilesize`.
 - `maxparts:integer`: maximum total number of file and text parts, including parts with empty bodies and repeated field names. Omitted or nil defaults to `1000`, including calls using positional arguments. Zero permits no parts; negative integers are treated as zero. The limit is checked before parsing the next part's headers. Exactly the limit is allowed.
+- `writer:table|userdata`: optional file-body writer. Text fields are handled by the decoder.
+    `n, err, timeout = writer:writefile(file, s)` receives the module-created
+    destination file and a string of payload bytes. It returns the number of
+    bytes written, an optional error, and an optional timeout flag. The writer
+    handles completing each write, asynchronous waits, timeout settings and
+    nonblocking descriptor flags. The decoder does not retry writes or restore
+    those flags. The writer must not close the file; creation, final positioning
+    and cleanup remain the decoder's responsibility.
 
 **Returns**
 
-- `form:table`: a form table
+- `form:table|nil`: a form table, or nil on failure.
 - `err:any`: error value.
+- `timeout:boolean|nil`: true if reading or writing timed out.
+
+The timeout flag is independent of the error result: a reader or writer may
+return both an error and `timeout=true`. Decoding stops on either, including
+when partial data or a partial byte count is returned. With an error, the result
+is `nil, EDECODE-wrapped error, timeout`; a timeout without an error returns
+`nil, nil, true`.
+
+A nil or empty reader result without an error or timeout indicates EOF.
+A timeout is never treated as EOF, including after a closing boundary.
 
 Invalid suffixes after a normal or closing boundary delimiter return a decoding
 error. SP/HTAB padding is accepted; normal delimiters require a line ending,

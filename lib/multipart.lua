@@ -39,6 +39,7 @@ local file_type = io.type
 local is = require('lauxhlib.is')
 local is_file = is.file
 local is_uint = is.uint
+local is_int = is.int
 local is_pint = is.pint
 local mkstemp = require('mkstemp')
 local gcfn = require('gcfn')
@@ -48,6 +49,7 @@ local new_errno = require('errno').new
 local new_error_type = require('error').type.new
 -- constants
 local MAX_HEADERS_SIZE = 16384
+local DEFAULT_MAX_PARTS = 1000
 local EENCODE = new_error_type('form.multipart.encode', nil,
                                'form-multipart encode error')
 local EDECODE = new_error_type('form.multipart.decode', nil,
@@ -1053,13 +1055,14 @@ local function gc_discard_form_file(pathname)
 end
 
 --- Normalize and validate decode options without modifying caller-owned tables.
---- @param is_reader boolean Whether chunksize is used by the input reader.
+--- @param has_reader boolean Whether chunksize is used by the input reader.
 --- @param ... table|string|integer|nil Options table or legacy positional arguments.
 --- @return string filetmpl
 --- @return integer? maxfilesize
 --- @return any chunksize Validated only for reader input.
 --- @return integer? maxsize
-local function checkopts(is_reader, ...)
+--- @return integer maxparts
+local function checkopts(has_reader, ...)
     local narg = select('#', ...)
     local filetmpl, maxfilesize, chunksize = ...
     local opts = filetmpl
@@ -1071,12 +1074,15 @@ local function checkopts(is_reader, ...)
         }
     end
 
-    filetmpl = opts.filetmpl
-    maxfilesize = opts.maxfilesize
-    chunksize = opts.chunksize
-    local maxsize = opts.maxsize
+    -- validate the following options:
+    --  filetmpl: string template for temporary files
+    --  maxfilesize: maximum allowed file size
+    --  chunksize: size of chunks to read from the input reader
+    --  maxsize: maximum allowed size for the entire form
+    --  maxparts: maximum number of parts allowed in the form
 
-    if is_reader then
+    chunksize = opts.chunksize
+    if has_reader then
         if chunksize == nil then
             chunksize = 4096
         elseif not is_pint(chunksize) then
@@ -1084,6 +1090,7 @@ local function checkopts(is_reader, ...)
         end
     end
 
+    filetmpl = opts.filetmpl
     if filetmpl == nil then
         filetmpl = '/tmp/lua_form_multipart_XXXXXX'
     elseif type(filetmpl) ~= 'string' then
@@ -1092,13 +1099,26 @@ local function checkopts(is_reader, ...)
         filetmpl = filetmpl .. '_XXXXXX'
     end
 
+    maxfilesize = opts.maxfilesize
     if maxfilesize ~= nil and not is_uint(maxfilesize) then
         error('maxfilesize must be uint', 3)
     end
+
+    local maxsize = opts.maxsize
     if maxsize ~= nil and not is_uint(maxsize) then
         error('maxsize must be uint', 3)
     end
-    return filetmpl, maxfilesize, chunksize, maxsize
+
+    local maxparts = opts.maxparts
+    if maxparts == nil then
+        maxparts = DEFAULT_MAX_PARTS
+    elseif not is_int(maxparts) then
+        error('maxparts must be integer', 3)
+    elseif maxparts < 0 then
+        maxparts = 0
+    end
+
+    return filetmpl, maxfilesize, chunksize, maxsize, maxparts
 end
 
 --- decode
@@ -1124,8 +1144,10 @@ local function decode(chunk, boundary, ...)
         error(boundary_err, 2)
     end
 
-    local filetmpl, maxfilesize, chunksize, maxsize = checkopts(reader ~= nil, ...)
-
+    -- check and retrieve options
+    local filetmpl, maxfilesize, chunksize, maxsize, maxparts = checkopts(
+                                                                    reader ~=
+                                                                        nil, ...)
     local ctx = {
         chunk = chunk,
         reader = reader,
@@ -1136,7 +1158,6 @@ local function decode(chunk, boundary, ...)
         nread = 0,
         buf = '',
     }
-
     local form = {}
 
     -- parse multipart/form-data
@@ -1162,7 +1183,15 @@ local function decode(chunk, boundary, ...)
         end
 
         -- parse body-part
+        local nparts = 0
         repeat
+            -- Enforce the count before reading headers or creating a file.
+            if nparts >= maxparts then
+                return false,
+                       new_errno('E2BIG', 'multipart body exceeds maxparts')
+            end
+            nparts = nparts + 1
+
             local part
             part, err = decode_headers(ctx)
             if not part then

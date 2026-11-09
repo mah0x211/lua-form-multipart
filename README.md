@@ -32,8 +32,9 @@ without an errno remain untyped causes. Invalid top-level arguments raise except
 
 Invalid part fields or malformed multipart data have an `errno.EINVAL` cause.
 Exceeding `maxfilesize` or `maxsize` has an `errno.EFBIG` cause.
-Use `error.typeof(err)` to check the outer type and `error.is(err, errno.EINVAL)`
-or `error.is(err, errno.EFBIG)` to inspect causes.
+Exceeding `maxparts` has an `errno.E2BIG` cause.
+Use `error.typeof(err)` to check the outer type. Use `error.is(err, errno.EINVAL)`,
+`error.is(err, errno.EFBIG)`, or `error.is(err, errno.E2BIG)` to inspect causes.
 
 
 ## res, err = multipart.encode( form, boundary [, writer] )
@@ -242,6 +243,7 @@ independent of HTTP chunk boundaries.
 - `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Zero permits only empty files; nil leaves file sizes unlimited.
 - `chunksize:integer`: if `chunk` is not a string, the maximum number of bytes requested from `chunk.read` per call. This value must be greater than `0`. Requests may be smaller when `maxsize` is set. (default: `4096`)
 - `maxsize:integer`: maximum total bytes received, including the preamble, part headers, text and file data, boundaries, padding and epilogue. Must be a nonnegative integer; nil leaves the total unlimited. Exactly the limit is allowed. This limit is independent of `maxfilesize`.
+- `maxparts:integer`: maximum total number of file and text parts, including parts with empty bodies and repeated field names. Omitted or nil defaults to `1000`, including calls using positional arguments. Zero permits no parts; negative integers are treated as zero. The limit is checked before parsing the next part's headers. Exactly the limit is allowed.
 
 **Returns**
 

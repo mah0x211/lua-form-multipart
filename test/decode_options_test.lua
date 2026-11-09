@@ -141,9 +141,9 @@ end
 function testcase.decode_options_invalid_values_raise_before_reading()
     for _, case in ipairs({
         { opts = { filetmpl = false }, message = 'filetmpl must be string' },
-        { opts = { maxfilesize = -1 }, message = 'maxfilesize must be uint' },
+        { opts = { maxfilesize = -1.5 }, message = 'maxfilesize must be integer' },
         { opts = { chunksize = 0 }, message = 'chunksize must be positive integer' },
-        { opts = { maxsize = '1' }, message = 'maxsize must be uint' },
+        { opts = { maxsize = '1' }, message = 'maxsize must be integer' },
     }) do
         local calls = 0
         local source = { read = function() calls = calls + 1 end }

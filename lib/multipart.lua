@@ -38,7 +38,6 @@ local open = io.open
 local file_type = io.type
 local is = require('lauxhlib.is')
 local is_file = is.file
-local is_uint = is.uint
 local is_int = is.int
 local is_pint = is.pint
 local mkstemp = require('mkstemp')
@@ -1100,13 +1099,21 @@ local function checkopts(has_reader, ...)
     end
 
     maxfilesize = opts.maxfilesize
-    if maxfilesize ~= nil and not is_uint(maxfilesize) then
-        error('maxfilesize must be uint', 3)
+    if maxfilesize ~= nil then
+        if not is_int(maxfilesize) then
+            error('maxfilesize must be integer', 3)
+        elseif maxfilesize < 0 then
+            maxfilesize = 0
+        end
     end
 
     local maxsize = opts.maxsize
-    if maxsize ~= nil and not is_uint(maxsize) then
-        error('maxsize must be uint', 3)
+    if maxsize ~= nil then
+        if not is_int(maxsize) then
+            error('maxsize must be integer', 3)
+        elseif maxsize < 0 then
+            maxsize = 0
+        end
     end
 
     local maxparts = opts.maxparts

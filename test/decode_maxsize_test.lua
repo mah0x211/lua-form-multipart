@@ -70,6 +70,25 @@ function testcase.decode_zero_budget_rejects_input_but_preserves_empty_input_err
     end
 end
 
+function testcase.decode_negative_total_limits_match_zero()
+    for _, limit in ipairs({ -1, -100 }) do
+        local opts = { maxsize = limit }
+        assert_maxsize_error(multipart.decode(body, 'b', opts))
+        local source = reader(body)
+        assert_maxsize_error(multipart.decode(source, 'b', opts))
+        assert.equal(source.pos, 2)
+        assert.equal(source.calls, 1)
+        assert.equal(opts.maxsize, limit)
+
+        for _, input in ipairs({ '', reader(''), reader('', true) }) do
+            local form, err = multipart.decode(input, 'b', opts)
+            assert.is_nil(form)
+            assert.not_nil(errlib.is(err, errno.EINVAL))
+            assert.is_nil(errlib.is(err, errno.EFBIG))
+        end
+    end
+end
+
 function testcase.decode_limits_bytes_in_every_multipart_region()
     local input = 'preamble\r\n--b \t\r\n' ..
         'Content-Disposition: form-data; name="foo"\r\n\r\nvalue\r\n' ..
@@ -145,13 +164,13 @@ function testcase.decode_unlimited_default_keeps_previous_read_requests()
 end
 
 function testcase.decode_maxsize_argument_contract_violations_raise()
-    for _, value in ipairs({ false, '1', {}, -1, 1.5, math.huge, 0 / 0 }) do
+    for _, value in ipairs({ false, '1', {}, -1.5, 1.5, math.huge, -math.huge, 0 / 0 }) do
         local calls = 0
         local ok, err = pcall(multipart.decode, {
             read = function() calls = calls + 1 end,
         }, 'b', { maxsize = value })
         assert.is_false(ok)
-        assert.match(tostring(err), 'maxsize must be uint')
+        assert.match(tostring(err), 'maxsize must be integer')
         assert.is_nil(errlib.is(err, multipart.EDECODE))
         assert.equal(calls, 0)
     end

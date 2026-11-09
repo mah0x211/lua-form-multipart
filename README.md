@@ -240,9 +240,9 @@ independent of HTTP chunk boundaries.
 **Options**
 
 - `filetmpl:string`: template for the filename to be created. the filename will be appended with `_XXXXXX` at the end. the `_XXXXXXXX` will be a random string. (default: `/tmp/lua_form_multipart_XXXXXX`)
-- `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Zero permits only empty files; nil leaves file sizes unlimited.
+- `maxfilesize:integer`: maximum number of body bytes per file. Text fields and multipart boundaries or padding are not counted. Negative integers are treated as zero. Zero permits only empty files; nil leaves file sizes unlimited.
 - `chunksize:integer`: if `chunk` is not a string, the maximum number of bytes requested from `chunk.read` per call. This value must be greater than `0`. Requests may be smaller when `maxsize` is set. (default: `4096`)
-- `maxsize:integer`: maximum total bytes received, including the preamble, part headers, text and file data, boundaries, padding and epilogue. Must be a nonnegative integer; nil leaves the total unlimited. Exactly the limit is allowed. This limit is independent of `maxfilesize`.
+- `maxsize:integer`: maximum total bytes received, including the preamble, part headers, text and file data, boundaries, padding and epilogue. Must be an integer; negative values are treated as zero, and nil leaves the total unlimited. Exactly the limit is allowed. This limit is independent of `maxfilesize`.
 - `maxparts:integer`: maximum total number of file and text parts, including parts with empty bodies and repeated field names. Omitted or nil defaults to `1000`, including calls using positional arguments. Zero permits no parts; negative integers are treated as zero. The limit is checked before parsing the next part's headers. Exactly the limit is allowed.
 
 **Returns**

@@ -434,7 +434,7 @@ function testcase.decode()
     -- test that throws an error if maxfilesize argument is invalid
     err = assert.throws(multipart.decode, 'hello', 'boundary', '/tmp/test_file',
                         {})
-    assert.match(err, 'maxfilesize must be uint')
+    assert.match(err, 'maxfilesize must be integer')
 end
 
 function testcase.decode_with_reader()

@@ -76,6 +76,10 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
+    Part header values are converted with `tostring`. CRLF followed by SP/HTAB
+    is permitted as header folding; other CR/LF sequences return `EENCODE`
+    with an `errno.EINVAL` cause.
+
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
     ```
@@ -270,6 +274,8 @@ independent of HTTP chunk boundaries.
     nonblocking descriptor flags. The decoder does not retry writes or restore
     those flags. The writer must not close the file; creation, final positioning
     and cleanup remain the decoder's responsibility.
+    A successful write must return exactly `#s`. A different byte count without
+    an error or timeout stops decoding with `EDECODE` and an `errno.EIO` cause.
 
 **Returns**
 

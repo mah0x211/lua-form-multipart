@@ -79,6 +79,35 @@ function testcase.decode_custom_writer_saves_files_and_leaves_text_fields_unchan
     end
 end
 
+function testcase.decode_custom_writer_rejects_incomplete_or_excess_byte_counts()
+    for _, count in ipairs({ 0, 1, 4 }) do
+        local prefix = temp_prefix()
+        local captured, calls
+        calls = 0
+        collectgarbage('stop')
+        local form, err, timeout = multipart.decode(header .. 'ABC' .. '\r\n--b--', 'b', {
+            filetmpl = prefix,
+            writer = { writefile = function(_, file, s)
+                captured = file
+                files[#files + 1] = file
+                calls = calls + 1
+                assert.equal(s, 'ABC')
+                assert(file:write(s:sub(1, count)))
+                return count, nil, false
+            end },
+        })
+        collectgarbage('restart')
+        assert.is_nil(form)
+        assert.equal(errlib.typeof(err), multipart.EDECODE)
+        assert.not_nil(errlib.is(err, errno.EIO))
+        assert.match(tostring(err), 'writer.writefile returned an unexpected byte count')
+        assert.is_false(timeout)
+        assert.equal(calls, 1)
+        assert.equal(io.type(captured), 'closed file')
+        assert.empty(paths(prefix))
+    end
+end
+
 function testcase.decode_custom_writer_failures_stop_and_dispose_of_files()
     for _, streaming in ipairs({ false, true }) do
         for _, cause in ipairs({ false, 'write failed', errno.EAGAIN:new('write failed') }) do

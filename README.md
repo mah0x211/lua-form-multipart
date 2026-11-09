@@ -270,6 +270,8 @@ independent of HTTP chunk boundaries.
     nonblocking descriptor flags. The decoder does not retry writes or restore
     those flags. The writer must not close the file; creation, final positioning
     and cleanup remain the decoder's responsibility.
+    A successful write must return exactly `#s`. A different byte count without
+    an error or timeout stops decoding with `EDECODE` and an `errno.EIO` cause.
 
 **Returns**
 

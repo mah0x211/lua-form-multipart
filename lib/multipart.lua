@@ -1061,7 +1061,8 @@ local function discard_preamble(ctx)
             end
 
             ctx.buf = buf
-            local ok, err, timeout, invalid, nextpos = skip_terminator(ctx, false, pos)
+            local ok, err, timeout, invalid, nextpos =
+                skip_terminator(ctx, false, pos)
             if ok then
                 if closing then
                     return false, new_errno('EINVAL',
@@ -1230,9 +1231,8 @@ local function decode(chunk, boundary, ...)
     end
 
     -- check and retrieve options
-    local filetmpl, maxfilesize, chunksize, maxsize, maxparts, filewriter = checkopts(
-                                                                    reader ~=
-                                                                        nil, ...)
+    local filetmpl, maxfilesize, chunksize, maxsize, maxparts, filewriter =
+        checkopts(reader ~= nil, ...)
     local ctx = {
         chunk = chunk,
         reader = reader,
@@ -1263,17 +1263,31 @@ local function decode(chunk, boundary, ...)
                 part_data[#part_data + 1] = s
                 return true
             end
+
+            local n
+            -- If a file writer is provided, use it to write the part's data to
+            -- the file.
             if filewriter then
-                local n, write_err, write_timeout = filewriter:writefile(part_file, s)
-                check_timeout(write_timeout, 'writer.writefile')
-                return n, write_err, write_timeout
+                n, err, timeout = filewriter:writefile(part_file, s)
+                check_timeout(timeout, 'writer.writefile')
+                if not n or err or timeout then
+                    return n, err, timeout
+                elseif n ~= #s then
+                    return nil, new_errno('EIO',
+                                          'writer.writefile returned an unexpected byte count'),
+                           timeout
+                end
+                return n
             end
-            local result, write_err, errnum = part_file:write(s)
+
+            -- Otherwise, write the part's data directly to the file.
+            local errnum
+            n, err, errnum = part_file:write(s)
             -- Preserve the numeric errno returned by Lua for file-write errors.
-            if not result and errnum then
-                return nil, new_errno(errnum, write_err, 'write')
+            if not n and errnum then
+                return nil, new_errno(errnum, err, 'write')
             end
-            return result, write_err
+            return n, err
         end
 
         -- parse body-part

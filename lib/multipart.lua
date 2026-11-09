@@ -151,12 +151,22 @@ local function seek_file(file, whence, offset)
     return position
 end
 
+--- Validate the optional timeout returned by an I/O method.
+--- @param timeout any
+--- @param method string
+local function check_timeout(timeout, method)
+    if timeout ~= nil and type(timeout) ~= 'boolean' then
+        error(method .. ' timeout must be boolean or nil', 2)
+    end
+end
+
 --- encode_part_file
 --- @param ctx table
 --- @param name string
 --- @param part table
 --- @return integer? nbyte
 --- @return any err
+--- @return boolean? timeout
 local function encode_part_file(ctx, name, part)
     local writer = ctx.writer
     local file = part.file
@@ -166,9 +176,10 @@ local function encode_part_file(ctx, name, part)
     local s = format(
                   'Content-Disposition: form-data; name=%q; filename=%q\r\n\r\n',
                   name, part.filename)
-    local n, err = writer:write(s)
-    if err then
-        return nil, err
+    local n, err, timeout = writer:write(s)
+    check_timeout(timeout, 'writer.write')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     nbyte = nbyte + n
 
@@ -182,9 +193,10 @@ local function encode_part_file(ctx, name, part)
         len = 0
     end
     seek_file(file, 'set', offset)
-    n, err = writer:writefile(file, len, offset, part)
-    if err then
-        return nil, err
+    n, err, timeout = writer:writefile(file, len, offset, part)
+    check_timeout(timeout, 'writer.writefile')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     return nbyte + n
 end
@@ -195,6 +207,7 @@ end
 --- @param part table
 --- @return integer? nbyte
 --- @return any err
+--- @return boolean? timeout
 local function encode_part_data(ctx, name, part)
     local writer = ctx.writer
     local data = part.data
@@ -202,9 +215,10 @@ local function encode_part_data(ctx, name, part)
 
     -- write content-disposition header
     local s = format('Content-Disposition: form-data; name=%q\r\n\r\n', name)
-    local n, err = writer:write(s)
-    if err then
-        return nil, err
+    local n, err, timeout = writer:write(s)
+    check_timeout(timeout, 'writer.write')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     nbyte = nbyte + n
 
@@ -213,9 +227,10 @@ local function encode_part_data(ctx, name, part)
     end
 
     -- write data
-    n, err = writer:write(data)
-    if err then
-        return nil, err
+    n, err, timeout = writer:write(data)
+    check_timeout(timeout, 'writer.write')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     return nbyte + n
 end
@@ -227,15 +242,17 @@ end
 --- @param encode_body function
 --- @return integer? nbyte
 --- @return any err
+--- @return boolean? timeout
 local function encode_part(ctx, name, part, encode_body)
     local delimiter = ctx.delimiter
     local writer = ctx.writer
     local nbyte = 0
 
     -- write delimiter
-    local n, err = writer:write(delimiter)
-    if err then
-        return nil, err
+    local n, err, timeout = writer:write(delimiter)
+    check_timeout(timeout, 'writer.write')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     nbyte = nbyte + n
 
@@ -248,9 +265,10 @@ local function encode_part(ctx, name, part, encode_body)
                 not find(key, '%s') then
                 for _, v in ipairs(vals) do
                     local s = format('%s: %s\r\n', key, tostring(v))
-                    n, err = writer:write(s)
-                    if err then
-                        return nil, err
+                    n, err, timeout = writer:write(s)
+                    check_timeout(timeout, 'writer.write')
+                    if not n or err or timeout then
+                        return nil, err, timeout
                     end
                     nbyte = nbyte + n
                 end
@@ -259,16 +277,17 @@ local function encode_part(ctx, name, part, encode_body)
     end
 
     -- write body-part
-    n, err = encode_body(ctx, name, part)
-    if not n then
-        return nil, err
+    n, err, timeout = encode_body(ctx, name, part)
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     nbyte = nbyte + n
 
     -- write CRLF
-    n, err = writer:write('\r\n')
-    if err then
-        return nil, err
+    n, err, timeout = writer:write('\r\n')
+    check_timeout(timeout, 'writer.write')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     return nbyte + n
 end
@@ -296,6 +315,7 @@ end
 --- @param form table
 --- @return integer? nbyte
 --- @return any err
+--- @return boolean? timeout
 local function encode_form(ctx, form)
     local nbyte = 0
 
@@ -303,10 +323,11 @@ local function encode_form(ctx, form)
         if type(name) == 'string' and type(parts) == 'table' then
             for _, part in ipairs(parts) do
                 local t = type(part)
-                local n, err
+                local n = 0
+                local err, timeout
 
                 if VALID_DATATYPE[t] then
-                    n, err = encode_part(ctx, name, {
+                    n, err, timeout = encode_part(ctx, name, {
                         data = part,
                     }, encode_part_data)
                 elseif t == 'table' then
@@ -317,8 +338,8 @@ local function encode_form(ctx, form)
                                                   name))
                     elseif part.filename == nil then
                         if VALID_DATATYPE[type(part.data)] then
-                            n, err = encode_part(ctx, name, part,
-                                                 encode_part_data)
+                            n, err, timeout =
+                                encode_part(ctx, name, part, encode_part_data)
                         end
                     elseif type(part.filename) ~= 'string' then
                         -- invalid filename field
@@ -357,8 +378,9 @@ local function encode_form(ctx, form)
                             file_part.pathname = part.pathname
                             file_part.file = tmpfile
                             file_part.is_tmpfile = true
-                            n, err = encode_part(ctx, name, file_part,
-                                                 encode_part_file)
+                            n, err, timeout =
+                                encode_part(ctx, name, file_part,
+                                            encode_part_file)
                             close_tmpfile(ctx.filectx)
                         end
                     elseif not is_file(part.file) then
@@ -367,23 +389,24 @@ local function encode_form(ctx, form)
                                                   'file field in %q must be file*',
                                                   name))
                     else
-                        n, err = encode_part(ctx, name, part, encode_part_file)
+                        n, err, timeout =
+                            encode_part(ctx, name, part, encode_part_file)
                     end
                 end
 
-                if err then
-                    return nil, err
-                elseif n then
-                    nbyte = nbyte + n
+                if not n or err or timeout then
+                    return nil, err, timeout
                 end
+                nbyte = nbyte + n
             end
         end
     end
 
     -- write close-delimiter
-    local n, err = ctx.writer:write(ctx.close_delimiter)
-    if err then
-        return nil, err
+    local n, err, timeout = ctx.writer:write(ctx.close_delimiter)
+    check_timeout(timeout, 'writer.write')
+    if not n or err or timeout then
+        return nil, err, timeout
     end
     return nbyte + n
 end
@@ -423,8 +446,8 @@ local function is_valid_boundary(boundary)
 end
 
 --- @class form.multipart.writer
---- @field write fun(self, s:string):(n:integer?,err:any)
---- @field writefile fun(self, file:file*, len:integer, offset:integer, part:table):(n:integer?,err:any)
+--- @field write fun(self, s:string):(n:integer?,err:any,timeout:boolean?)
+--- @field writefile fun(self, file:file*, len:integer, offset:integer, part:table):(n:integer?,err:any,timeout:boolean?)
 
 --- @class form.multipart.default_writer : form.multipart.writer
 --- @field multipart string[]
@@ -471,6 +494,7 @@ end
 --- @param writer? form.multipart.writer
 --- @return string|integer|nil res
 --- @return any err
+--- @return boolean? timeout
 local function encode(form, boundary, writer)
     -- verify form
     if type(form) ~= 'table' then
@@ -521,8 +545,8 @@ local function encode(form, boundary, writer)
         gco = gcfn(close_tmpfile, ctx.filectx)
     end
 
-    local res
-    ok, res, err = protected_call(encode_form, ctx, form)
+    local res, timeout
+    ok, res, err, timeout = protected_call(encode_form, ctx, form)
     close_tmpfile(ctx.filectx)
     if gco then
         gco:disable()
@@ -531,7 +555,10 @@ local function encode(form, boundary, writer)
     if not ok then
         return nil, EENCODE:new(nil, toerror(res))
     elseif not res then
-        return nil, EENCODE:new(nil, toerror(err))
+        if timeout and not err then
+            return nil, nil, timeout
+        end
+        return nil, EENCODE:new(nil, toerror(err)), timeout
     elseif multipart then
         return concat(multipart, '')
     end

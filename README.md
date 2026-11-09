@@ -43,7 +43,7 @@ Use `error.typeof(err)` to check the outer type. Use `error.is(err, errno.EINVAL
 `error.is(err, errno.EFBIG)`, or `error.is(err, errno.E2BIG)` to inspect causes.
 
 
-## res, err = multipart.encode( form, boundary [, writer] )
+## res, err, timeout = multipart.encode( form, boundary [, writer] )
 
 encode a form table to string in `multipart/form-data` format.
 
@@ -79,15 +79,17 @@ encode a form table to string in `multipart/form-data` format.
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
     ```
-    n, err = writer:write( s )
-    - n:integer: number of bytes written.
+    n, err, timeout = writer:write( s )
+    - n:integer|nil: number of bytes written, or nil on failure.
     - err:any: error value.
+    - timeout:boolean|nil: true if the operation timed out.
     - s:string: output string.
     ```
     ```
-    n, err = writer:writefile( file, len, offset, part )
-    - n:integer: number of bytes written.
+    n, err, timeout = writer:writefile( file, len, offset, part )
+    - n:integer|nil: number of bytes written, or nil on failure.
     - err:any: error value.
+    - timeout:boolean|nil: true if the operation timed out.
     - file:file*: file that contains the file data.
     - len:integer: number of bytes from the current file position to the end of the file.
     - offset:integer: file offset at which to begin the writeout.
@@ -107,11 +109,20 @@ For these parts, custom writers receive `part.file` and `part.is_tmpfile=true`.
 
 **Returns**
 
-- `res:string|integer|nil`: a string in `multipart/form-data` format, number of bytes written, or nil on error.
+- `res:string|integer|nil`: a string in `multipart/form-data` format, number of bytes written, or nil on failure.
   - if the `writer` parameter is not specified, it returns a string in `multipart/form-data` format.
   - otherwise, it returns the number of bytes written to the `writer:write` and `writer:writefile` methods.
 - `err:any`: error value.
+- `timeout:boolean|nil`: true if the writer timed out.
 
+If a writer returns no byte count, an error, or a true timeout flag, encoding
+stops without retrying. This also applies when an error or timeout accompanies
+a partial byte count; output already written is retained. A timeout without
+an error returns `nil, nil, true`; an accompanying error is wrapped in
+`EENCODE` and the timeout flag is preserved.
+
+Custom writers own their timeout settings, asynchronous waits and nonblocking
+file-descriptor flags. The encoder does not configure or restore those flags.
 
 **Usage**
 

@@ -1122,15 +1122,120 @@ end
 --- @class form.multipart.decode_writer
 --- @field writefile fun(self, file:file*, s:string):(n:integer?,err:any,timeout:boolean?)
 
+--- Decode multipart parts into the caller-owned form.
+--- @param ctx table
+--- @param form table
+--- @return boolean ok
+--- @return any err
+--- @return boolean? timeout
+local function decode_form(ctx, form)
+    local maxfilesize = ctx.maxfilesize
+    local filewriter = ctx.writer
+    local ok, err, timeout = discard_preamble(ctx)
+    if not ok then
+        return false, err, timeout
+    end
+
+    -- setup body writer
+    local part_data, part_file
+    local writer = function(s)
+        if part_data then
+            part_data[#part_data + 1] = s
+            return true
+        end
+
+        local n
+        -- If a file writer is provided, use it to write the part's data to
+        -- the file.
+        if filewriter then
+            n, err, timeout = filewriter:writefile(part_file, s)
+            check_timeout(timeout, 'writer.writefile')
+            if not n or err or timeout then
+                return n, err, timeout
+            elseif n ~= #s then
+                return nil, new_errno('EIO',
+                                      'writer.writefile returned an unexpected byte count'),
+                       timeout
+            end
+            return n
+        end
+
+        -- Otherwise, write the part's data directly to the file.
+        local errnum
+        n, err, errnum = part_file:write(s)
+        -- Preserve the numeric errno returned by Lua for file-write errors.
+        if not n and errnum then
+            return nil, new_errno(errnum, err, 'write')
+        end
+        return n, err
+    end
+
+    -- parse body-part
+    local nparts = 0
+    repeat
+        -- Enforce the count before reading headers or creating a file.
+        if nparts >= ctx.maxparts then
+            return false, new_errno('E2BIG', 'multipart body exceeds maxparts')
+        end
+        nparts = nparts + 1
+
+        local part
+        part, err, timeout = decode_headers(ctx)
+        if not part then
+            return false, err, timeout
+        elseif not part.name then
+            return false, new_errno('EINVAL',
+                                    'Content-Disposition header does not contain a name parameter')
+        end
+
+        -- Register the part before reading its body so failed uploads
+        -- are included in discard_form cleanup.
+        local parts = form[part.name]
+        if not parts then
+            parts = {}
+            form[part.name] = parts
+        end
+        parts[#parts + 1] = part
+
+        local again
+        if part.filename then
+            ctx.maxfilesize = maxfilesize
+            part.file, err, part.pathname = mkstemp(ctx.filetmpl)
+            if not part.file then
+                return false,
+                       errorf('failed to create multipart temporary file', err)
+            end
+            part.gc = gcfn(gc_discard_form_file, part.pathname)
+            part_file = part.file
+            ok, err, timeout, again = decode_body(ctx, writer)
+            if ok then
+                part_file:seek('set')
+            end
+            part_file = nil
+        else
+            ctx.maxfilesize = nil
+            part_data = {}
+            ok, err, timeout, again = decode_body(ctx, writer)
+            part.data = concat(part_data)
+            part_data = nil
+        end
+
+        if not ok then
+            return false, err, timeout
+        end
+    until not again
+
+    ok, err, timeout = discard_epilogue(ctx)
+    if not ok then
+        return false, err, timeout
+    end
+    return true
+end
+
 --- Normalize and validate decode options without modifying caller-owned tables.
 --- @param has_reader boolean Whether chunksize is used by the input reader.
 --- @param ... table|string|integer|nil Options table or legacy positional arguments.
---- @return string filetmpl
---- @return integer? maxfilesize
---- @return any chunksize Validated only for reader input.
---- @return integer? maxsize
---- @return integer maxparts
---- @return form.multipart.decode_writer? writer
+--- @return table opts Validated options in a new table.
 local function checkopts(has_reader, ...)
     local narg = select('#', ...)
     local filetmpl, maxfilesize, chunksize = ...
@@ -1203,7 +1308,14 @@ local function checkopts(has_reader, ...)
         error('writer.writefile must be function', 3)
     end
 
-    return filetmpl, maxfilesize, chunksize, maxsize, maxparts, writer
+    return {
+        filetmpl = filetmpl,
+        maxfilesize = maxfilesize,
+        chunksize = chunksize,
+        maxsize = maxsize or huge,
+        maxparts = maxparts,
+        writer = writer,
+    }
 end
 
 --- decode
@@ -1231,18 +1343,15 @@ local function decode(chunk, boundary, ...)
     end
 
     -- check and retrieve options
-    local filetmpl, maxfilesize, chunksize, maxsize, maxparts, filewriter =
-        checkopts(reader ~= nil, ...)
-    local ctx = {
-        chunk = chunk,
-        reader = reader,
-        delimiter = '--' .. boundary,
-        close_delimiter = '--' .. boundary .. '--',
-        chunksize = chunksize,
-        maxsize = maxsize or huge,
-        nread = 0,
-        buf = '',
-    }
+    local ctx = checkopts(reader ~= nil, ...)
+    ctx.chunk = chunk
+    ctx.reader = reader
+    ctx.delimiter = '--' .. boundary
+    ctx.close_delimiter = '--' .. boundary .. '--'
+    ctx.nread = 0
+    ctx.buf = ''
+
+    -- initialize form table and garbage collector for Lua 5.1
     local form = {}
     local gco
     if IS_LUA51 then
@@ -1250,108 +1359,7 @@ local function decode(chunk, boundary, ...)
     end
 
     -- parse multipart/form-data
-    local ok, res, err, timeout = protected_call(function()
-        local ok, err, timeout = discard_preamble(ctx)
-        if not ok then
-            return false, err, timeout
-        end
-
-        -- setup body writer
-        local part_data, part_file
-        local writer = function(s)
-            if part_data then
-                part_data[#part_data + 1] = s
-                return true
-            end
-
-            local n
-            -- If a file writer is provided, use it to write the part's data to
-            -- the file.
-            if filewriter then
-                n, err, timeout = filewriter:writefile(part_file, s)
-                check_timeout(timeout, 'writer.writefile')
-                if not n or err or timeout then
-                    return n, err, timeout
-                elseif n ~= #s then
-                    return nil, new_errno('EIO',
-                                          'writer.writefile returned an unexpected byte count'),
-                           timeout
-                end
-                return n
-            end
-
-            -- Otherwise, write the part's data directly to the file.
-            local errnum
-            n, err, errnum = part_file:write(s)
-            -- Preserve the numeric errno returned by Lua for file-write errors.
-            if not n and errnum then
-                return nil, new_errno(errnum, err, 'write')
-            end
-            return n, err
-        end
-
-        -- parse body-part
-        local nparts = 0
-        repeat
-            -- Enforce the count before reading headers or creating a file.
-            if nparts >= maxparts then
-                return false,
-                       new_errno('E2BIG', 'multipart body exceeds maxparts')
-            end
-            nparts = nparts + 1
-
-            local part
-            part, err, timeout = decode_headers(ctx)
-            if not part then
-                return false, err, timeout
-            elseif not part.name then
-                return false, new_errno('EINVAL',
-                                        'Content-Disposition header does not contain a name parameter')
-            end
-
-            -- Register the part before reading its body so failed uploads
-            -- are included in discard_form cleanup.
-            local parts = form[part.name]
-            if not parts then
-                parts = {}
-                form[part.name] = parts
-            end
-            parts[#parts + 1] = part
-
-            local again
-            if part.filename then
-                ctx.maxfilesize = maxfilesize
-                part.file, err, part.pathname = mkstemp(filetmpl)
-                if not part.file then
-                    return false, errorf(
-                               'failed to create multipart temporary file', err)
-                end
-                part.gc = gcfn(gc_discard_form_file, part.pathname)
-                part_file = part.file
-                ok, err, timeout, again = decode_body(ctx, writer)
-                if ok then
-                    part_file:seek('set')
-                end
-                part_file = nil
-            else
-                ctx.maxfilesize = nil
-                part_data = {}
-                ok, err, timeout, again = decode_body(ctx, writer)
-                part.data = concat(part_data)
-                part_data = nil
-            end
-
-            if not ok then
-                return false, err, timeout
-            end
-        until not again
-
-        ok, err, timeout = discard_epilogue(ctx)
-        if not ok then
-            return false, err, timeout
-        end
-        return true
-    end)
+    local ok, res, err, timeout = protected_call(decode_form, ctx, form)
 
     if not ok or not res then
         discard_form(form)

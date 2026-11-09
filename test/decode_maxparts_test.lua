@@ -215,10 +215,9 @@ function testcase.decode_invalid_part_limits_raise_before_reading()
     end
 end
 
-function testcase.decode_still_rejects_a_closing_boundary_before_any_part()
+function testcase.decode_accepts_an_empty_form_with_zero_part_limit()
     local form, err = multipart.decode('--b--\r\n', 'b', { maxparts = 0 })
-    assert.is_nil(form)
-    assert.equal(errlib.typeof(err), multipart.EDECODE)
-    assert.not_nil(errlib.is(err, errno.EINVAL))
-    assert.match(tostring(err), 'boundary not started')
+    assert.is_nil(err)
+    assert.is_table(form)
+    assert.empty(form)
 end

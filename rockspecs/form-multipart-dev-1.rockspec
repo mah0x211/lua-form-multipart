@@ -21,5 +21,8 @@ build = {
     type = "builtin",
     modules = {
         ["form.multipart"] = "lib/multipart.lua",
+        ["form.multipart.common"] = "lib/common.lua",
+        ["form.multipart.encode"] = "lib/encode.lua",
+        ["form.multipart.decode"] = "lib/decode.lua",
     },
 }

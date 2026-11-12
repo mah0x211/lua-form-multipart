@@ -111,6 +111,7 @@ function testcase.encode_pathname_form_supports_nested_calls()
     local encoded, err = multipart.encode(form, 'b')
     assert.is_nil(err)
     assert.equal(encoded, '--b\r\nX-Example: header value\r\n' ..
+        'Content-Type: application/octet-stream\r\n' ..
         'Content-Disposition: form-data; name="foo"; filename="x.txt"\r\n' ..
         '\r\ncontent\r\n--b--')
     assert.equal(inner, encoded)

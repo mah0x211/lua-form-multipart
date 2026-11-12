@@ -100,6 +100,7 @@ function testcase.encode()
             '--test_boundary',
             'X-Example: example header1',
             'X-Example: example header2',
+            'Content-Type: application/octet-stream',
             'Content-Disposition: form-data; name="foo"; filename="bar.txt"',
             '',
             'bar file',
@@ -121,6 +122,7 @@ function testcase.encode()
         }, '\r\n'),
         table.concat({
             '--test_boundary',
+            'Content-Type: application/octet-stream',
             'Content-Disposition: form-data; name="foo"; filename="baz.txt"',
             '',
             'baz file',
@@ -262,6 +264,7 @@ function testcase.encode_with_writer()
             '--test_boundary',
             'X-Example: example header1',
             'X-Example: example header2',
+            'Content-Type: application/octet-stream',
             'Content-Disposition: form-data; name="foo"; filename="bar.txt"',
             '',
             'bar file',
@@ -283,6 +286,7 @@ function testcase.encode_with_writer()
         }, '\r\n'),
         table.concat({
             '--test_boundary',
+            'Content-Type: application/octet-stream',
             'Content-Disposition: form-data; name="foo"; filename="baz.txt"',
             '',
             'baz file',

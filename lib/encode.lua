@@ -75,6 +75,21 @@ local function check_write_result(n, err, timeout, expected, method)
     end
 end
 
+-- ASCII control bytes except HTAB. Decimal escapes retain Lua 5.1 compatibility.
+local DISPOSITION_CONTROL_PATTERN = '[%z\1-\8\10-\31\127]'
+
+--- Quote a Content-Disposition parameter without Lua literal escapes.
+--- @param str string
+--- @param param string Parameter name used in an error message.
+--- @return string? quoted
+--- @return any err
+local function quote_disposition_param(str, param)
+    if find(str, DISPOSITION_CONTROL_PATTERN) then
+        return nil, new_errno('EINVAL', param .. ' contains a control character')
+    end
+    return '"' .. gsub(str, '(["\\])', '\\%1') .. '"'
+end
+
 --- encode_part_file
 --- @param ctx table
 --- @param name string
@@ -89,13 +104,23 @@ local function encode_part_file(ctx, name, part, has_content_type)
     local nbyte = 0
 
     -- write content-disposition header
+    local quoted_name, err = quote_disposition_param(name, 'name')
+    if not quoted_name then
+        return nil, err
+    end
+    local quoted_filename
+    quoted_filename, err = quote_disposition_param(part.filename, 'filename')
+    if not quoted_filename then
+        return nil, err
+    end
     local s = format(
-                  'Content-Disposition: form-data; name=%q; filename=%q\r\n\r\n',
-                  name, part.filename)
+                  'Content-Disposition: form-data; name=%s; filename=%s\r\n\r\n',
+                  quoted_name, quoted_filename)
     if not has_content_type then
         s = 'Content-Type: application/octet-stream\r\n' .. s
     end
-    local n, err, timeout = writer:write(s)
+    local n, timeout
+    n, err, timeout = writer:write(s)
     err = check_write_result(n, err, timeout, #s, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout
@@ -133,8 +158,13 @@ local function encode_part_data(ctx, name, part)
     local nbyte = 0
 
     -- write content-disposition header
-    local s = format('Content-Disposition: form-data; name=%q\r\n\r\n', name)
-    local n, err, timeout = writer:write(s)
+    local quoted_name, err = quote_disposition_param(name, 'name')
+    if not quoted_name then
+        return nil, err
+    end
+    local s = format('Content-Disposition: form-data; name=%s\r\n\r\n', quoted_name)
+    local n, timeout
+    n, err, timeout = writer:write(s)
     err = check_write_result(n, err, timeout, #s, 'writer.write')
     if not n or err or timeout then
         return nil, err, timeout

@@ -81,6 +81,11 @@ encode a form table to string in `multipart/form-data` format.
     File parts without a Content-Type header use `application/octet-stream`.
     Explicit Content-Type headers are preserved; text parts without one omit it.
 
+    Field names and filenames preserve spaces, HTAB and non-ASCII bytes.
+    Double quotes and backslashes are escaped using quoted-string syntax.
+    Other ASCII control characters, including CR, LF and NUL, return
+    `EENCODE` with an `errno.EINVAL` cause.
+
     Part header values are converted with `tostring`. CRLF followed by SP/HTAB
     is permitted as header folding; other CR/LF sequences return `EENCODE`
     with an `errno.EINVAL` cause.

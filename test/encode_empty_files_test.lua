@@ -13,6 +13,7 @@ function testcase.encode_empty_caller_file()
     assert.is_nil(err)
     assert.equal(state, 'file')
     assert.equal(encoded, '--b\r\n' ..
+        'Content-Type: application/octet-stream\r\n' ..
         'Content-Disposition: form-data; name="foo"; filename="empty.txt"\r\n' ..
         '\r\n\r\n--b--')
 end
@@ -25,6 +26,7 @@ function testcase.encode_empty_pathname_file()
     os.remove(path)
     assert.is_nil(err)
     assert.equal(encoded, '--b\r\n' ..
+        'Content-Type: application/octet-stream\r\n' ..
         'Content-Disposition: form-data; name="foo"; filename="empty.txt"\r\n' ..
         '\r\n\r\n--b--')
 end

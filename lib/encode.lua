@@ -25,6 +25,7 @@ local pcall = pcall
 local tostring = tostring
 local type = type
 local find = string.find
+local lower = string.lower
 local format = string.format
 local gsub = string.gsub
 local concat = table.concat
@@ -78,10 +79,11 @@ end
 --- @param ctx table
 --- @param name string
 --- @param part table
+--- @param has_content_type boolean
 --- @return integer? nbyte
 --- @return any err
 --- @return boolean? timeout
-local function encode_part_file(ctx, name, part)
+local function encode_part_file(ctx, name, part, has_content_type)
     local writer = ctx.writer
     local file = part.file
     local nbyte = 0
@@ -90,6 +92,9 @@ local function encode_part_file(ctx, name, part)
     local s = format(
                   'Content-Disposition: form-data; name=%q; filename=%q\r\n\r\n',
                   name, part.filename)
+    if not has_content_type then
+        s = 'Content-Type: application/octet-stream\r\n' .. s
+    end
     local n, err, timeout = writer:write(s)
     err = check_write_result(n, err, timeout, #s, 'writer.write')
     if not n or err or timeout then
@@ -161,6 +166,7 @@ local function encode_part(ctx, name, part, encode_body)
     local delimiter = ctx.delimiter
     local writer = ctx.writer
     local nbyte = 0
+    local has_content_type = false
 
     -- write delimiter
     local n, err, timeout = writer:write(delimiter)
@@ -174,9 +180,9 @@ local function encode_part(ctx, name, part, encode_body)
     if part.header then
         -- add headers
         for key, vals in pairs(part.header) do
-            -- write only values with the valid key
+            -- Content-Disposition is generated from the field name and filename.
             if type(vals) == 'table' and type(key) == 'string' and #key > 0 and
-                not find(key, '%s') then
+                not find(key, '%s') and lower(key) ~= 'content-disposition' then
                 for _, v in ipairs(vals) do
                     local value = tostring(v)
                     -- RFC 5322 section 2.2.3: only CRLF followed by SP/HTAB
@@ -194,13 +200,14 @@ local function encode_part(ctx, name, part, encode_body)
                         return nil, err, timeout
                     end
                     nbyte = nbyte + n
+                    has_content_type = has_content_type or lower(key) == 'content-type'
                 end
             end
         end
     end
 
     -- write body-part
-    n, err, timeout = encode_body(ctx, name, part)
+    n, err, timeout = encode_body(ctx, name, part, has_content_type)
     if not n or err or timeout then
         return nil, err, timeout
     end

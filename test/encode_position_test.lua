@@ -26,6 +26,7 @@ function testcase.encode_reads_from_current_position()
         } }, 'b')
         assert.is_nil(err)
         assert.equal(encoded, '--b\r\n' ..
+            'Content-Type: application/octet-stream\r\n' ..
             'Content-Disposition: form-data; name="foo"; filename="x.txt"\r\n' ..
             '\r\n' .. case.content .. '\r\n--b--')
     end
@@ -39,6 +40,7 @@ function testcase.encode_empty_remaining_range()
         } }, 'b')
         assert.is_nil(err)
         assert.equal(encoded, '--b\r\n' ..
+            'Content-Type: application/octet-stream\r\n' ..
             'Content-Disposition: form-data; name="foo"; filename="x.txt"\r\n' ..
             '\r\n\r\n--b--')
     end
@@ -70,6 +72,7 @@ function testcase.encode_passes_current_position_to_custom_writer()
         assert.is_nil(err)
         local encoded = table.concat(chunks)
         assert.equal(encoded, '--b\r\n' ..
+            'Content-Type: application/octet-stream\r\n' ..
             'Content-Disposition: form-data; name="foo"; filename="x.txt"\r\n' ..
             '\r\n' .. case.content .. '\r\n--b--')
         assert.equal(n, #encoded)

@@ -76,6 +76,11 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
+    Content-Disposition is generated from the field name and filename.
+    Entries for this header in `part.header` are ignored case-insensitively.
+    File parts without a Content-Type header use `application/octet-stream`.
+    Explicit Content-Type headers are preserved; text parts without one omit it.
+
     Part header values are converted with `tostring`. CRLF followed by SP/HTAB
     is permitted as header folding; other CR/LF sequences return `EENCODE`
     with an `errno.EINVAL` cause.
@@ -205,6 +210,7 @@ string value\r\n
 --example_boundary\r\n
 X-Example: example header1\r\n
 X-Example: example header2\r\n
+Content-Type: application/octet-stream\r\n
 Content-Disposition: form-data; name="foo"; filename="bar.txt"\r\n
 \r\n
 bar\r\n

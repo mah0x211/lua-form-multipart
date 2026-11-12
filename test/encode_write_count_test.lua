@@ -132,6 +132,7 @@ function testcase.encode_accepts_complete_and_zero_length_writes()
             end,
         })
         local expected = '--b\r\n' ..
+            'Content-Type: application/octet-stream\r\n' ..
             'Content-Disposition: form-data; name="upload"; filename="x"\r\n\r\n' ..
             data .. '\r\n--b--'
         assert.equal(table.concat(output), expected)

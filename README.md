@@ -76,6 +76,9 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
+    Content-Disposition is generated from the field name and filename.
+    Entries for this header in `part.header` are ignored case-insensitively.
+
     Part header values are converted with `tostring`. CRLF followed by SP/HTAB
     is permitted as header folding; other CR/LF sequences return `EENCODE`
     with an `errno.EINVAL` cause.

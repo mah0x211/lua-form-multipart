@@ -25,6 +25,7 @@ local pcall = pcall
 local tostring = tostring
 local type = type
 local find = string.find
+local lower = string.lower
 local format = string.format
 local gsub = string.gsub
 local concat = table.concat
@@ -174,9 +175,9 @@ local function encode_part(ctx, name, part, encode_body)
     if part.header then
         -- add headers
         for key, vals in pairs(part.header) do
-            -- write only values with the valid key
+            -- Content-Disposition is generated from the field name and filename.
             if type(vals) == 'table' and type(key) == 'string' and #key > 0 and
-                not find(key, '%s') then
+                not find(key, '%s') and lower(key) ~= 'content-disposition' then
                 for _, v in ipairs(vals) do
                     local value = tostring(v)
                     -- RFC 5322 section 2.2.3: only CRLF followed by SP/HTAB

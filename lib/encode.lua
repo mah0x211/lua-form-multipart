@@ -162,7 +162,8 @@ local function encode_part_data(ctx, name, part)
     if not quoted_name then
         return nil, err
     end
-    local s = format('Content-Disposition: form-data; name=%s\r\n\r\n', quoted_name)
+    local s = format('Content-Disposition: form-data; name=%s\r\n\r\n',
+                     quoted_name)
     local n, timeout
     n, err, timeout = writer:write(s)
     err = check_write_result(n, err, timeout, #s, 'writer.write')
@@ -211,8 +212,14 @@ local function encode_part(ctx, name, part, encode_body)
         -- add headers
         for key, vals in pairs(part.header) do
             -- Content-Disposition is generated from the field name and filename.
-            if type(vals) == 'table' and type(key) == 'string' and #key > 0 and
-                not find(key, '%s') and lower(key) ~= 'content-disposition' then
+            if type(vals) == 'table' and type(key) == 'string' and lower(key) ~=
+                'content-disposition' then
+                -- RFC 5322 section 2.2: printable ASCII 0x21-0x7E, except colon.
+                -- Use a literal range for Lua 5.1 compatibility.
+                if #key == 0 or find(key, '[^!-~]') or find(key, ':', 1, true) then
+                    return nil, new_errno('EINVAL',
+                                          format('invalid header name %q', key))
+                end
                 for _, v in ipairs(vals) do
                     local value = tostring(v)
                     -- RFC 5322 section 2.2.3: only CRLF followed by SP/HTAB

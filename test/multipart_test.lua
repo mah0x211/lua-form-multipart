@@ -54,11 +54,6 @@ function testcase.encode()
             },
             true,
             {
-                header = {
-                    ['this-header-is-ignored '] = {
-                        'invalid key',
-                    },
-                },
                 data = 'hello world',
             },
             {
@@ -199,11 +194,6 @@ function testcase.encode_with_writer()
             },
             true,
             {
-                header = {
-                    ['this-header-is-ignored '] = {
-                        'invalid key',
-                    },
-                },
                 data = 'hello world',
             },
             {

@@ -76,6 +76,10 @@ encode a form table to string in `multipart/form-data` format.
         ...
     }
     ```
+    Part header names must be nonempty printable ASCII (0x21-0x7E), excluding
+    colon. Invalid names, including whitespace and control characters, return
+    `EENCODE` with an `errno.EINVAL` cause.
+
     Content-Disposition is generated from the field name and filename.
     Entries for this header in `part.header` are ignored case-insensitively.
     File parts without a Content-Type header use `application/octet-stream`.

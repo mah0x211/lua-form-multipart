@@ -76,7 +76,7 @@ local function check_write_result(n, err, timeout, expected, method)
 end
 
 -- ASCII control bytes except HTAB. Decimal escapes retain Lua 5.1 compatibility.
-local DISPOSITION_CONTROL_PATTERN = '[%z\1-\8\10-\31\127]'
+local HEADER_CONTROL_PATTERN = '[%z\1-\8\10-\31\127]'
 
 --- Quote a Content-Disposition parameter without Lua literal escapes.
 --- @param str string
@@ -84,7 +84,7 @@ local DISPOSITION_CONTROL_PATTERN = '[%z\1-\8\10-\31\127]'
 --- @return string? quoted
 --- @return any err
 local function quote_disposition_param(str, param)
-    if find(str, DISPOSITION_CONTROL_PATTERN) then
+    if find(str, HEADER_CONTROL_PATTERN) then
         return nil, new_errno('EINVAL', param .. ' contains a control character')
     end
     return '"' .. gsub(str, '(["\\])', '\\%1') .. '"'
@@ -224,9 +224,14 @@ local function encode_part(ctx, name, part, encode_body)
                     local value = tostring(v)
                     -- RFC 5322 section 2.2.3: only CRLF followed by SP/HTAB
                     -- may appear as a folded header line.
-                    if find(gsub(value, '\r\n[ \t]', ''), '[\r\n]') then
+                    local unfolded = gsub(value, '\r\n[ \t]', '')
+                    if find(unfolded, '[\r\n]') then
                         return nil, new_errno('EINVAL', format(
                                                   'header %q contains an invalid line break',
+                                                  key))
+                    elseif find(unfolded, HEADER_CONTROL_PATTERN) then
+                        return nil, new_errno('EINVAL', format(
+                                                  'header %q contains a control character',
                                                   key))
                     end
                     local s = format('%s: %s\r\n', key, value)

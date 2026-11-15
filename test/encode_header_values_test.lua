@@ -7,6 +7,8 @@ local multipart = require('form.multipart')
 function testcase.encode_preserves_header_values_with_valid_folding()
     local values = {
         'metadata',
+        'first\tsecond',
+        '日本語',
         'first\r\n second',
         'first\r\n\tsecond',
         'first\r\n \tsecond\r\n third',
@@ -85,6 +87,41 @@ function testcase.encode_rejects_header_line_breaks_that_are_not_folding()
             assert.match(tostring(err), 'invalid line break')
             if streaming then
                 assert.equal(table.concat(output), '--b\r\n')
+            end
+        end
+    end
+end
+
+function testcase.encode_rejects_control_bytes_in_header_values()
+    for _, byte in ipairs({ 0, 1, 8, 11, 12, 14, 31, 127 }) do
+        for _, prefix in ipairs({ '', string.rep('a', 100) }) do
+            local value = prefix .. 'before' .. string.char(byte) .. 'after'
+            for _, streaming in ipairs({ false, true }) do
+                local output = {}
+                local writer
+                if streaming then
+                    writer = {
+                        write = function(_, s)
+                            output[#output + 1] = s
+                            return #s
+                        end,
+                        writefile = function() error('not a file part') end,
+                    }
+                end
+                local encoded, err, timeout = multipart.encode({
+                    text = {{
+                        data = 'value',
+                        header = { ['X-Test'] = { value } },
+                    }},
+                }, 'b', writer)
+                assert.is_nil(encoded)
+                assert.is_nil(timeout)
+                assert.equal(errlib.typeof(err), multipart.EENCODE)
+                assert.not_nil(errlib.is(err, errno.EINVAL))
+                assert.match(tostring(err), 'control character')
+                if streaming then
+                    assert.equal(table.concat(output), '--b\r\n')
+                end
             end
         end
     end

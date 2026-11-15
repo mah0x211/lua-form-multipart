@@ -92,7 +92,8 @@ encode a form table to string in `multipart/form-data` format.
 
     Part header values are converted with `tostring`. CRLF followed by SP/HTAB
     is permitted as header folding; other CR/LF sequences return `EENCODE`
-    with an `errno.EINVAL` cause.
+    with an `errno.EINVAL` cause. Other ASCII control characters, including
+    NUL and DEL, also return this error. HTAB and non-ASCII bytes are preserved.
 
 - `boundary:string`: a boundary string accepted by `multipart.is_valid_boundary`.
 - `writer:table|userdata`: call the `writer:write` and `writer:writefile` methods to output a string in `multipart/form-data` format.
@@ -146,6 +147,11 @@ an error returns `nil, nil, true`; an accompanying error is wrapped in
 
 Custom writers own their timeout settings, asynchronous waits and nonblocking
 file-descriptor flags. The encoder does not configure or restore those flags.
+
+For file parts supplied with `file`, encoding assigns the form field name to
+`part.name`, overwriting any existing value. Encoding the same form contents
+again from a writer callback may therefore change the part metadata visible
+to that callback.
 
 **Usage**
 

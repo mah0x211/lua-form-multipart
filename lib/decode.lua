@@ -772,7 +772,14 @@ local function decode_form(ctx, form)
             part_file = part.file
             ok, err, timeout, again = decode_body(ctx, writer)
             if ok then
-                part_file:seek('set')
+                local offset, errnum
+                offset, err, errnum = part_file:seek('set')
+                if not offset then
+                    return false,
+                           errorf('failed to rewind multipart temporary file',
+                                  errnum and new_errno(errnum, err, 'seek') or
+                                      err)
+                end
             end
             part_file = nil
         else

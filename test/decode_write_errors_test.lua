@@ -45,7 +45,7 @@ function testcase.after_each()
     prefixes = {}
 end
 
-local function check_write_failure(payload, chunksize)
+local function check_write_failure(payload, chunksize, operation)
     local file, _, pathname = assert(mkstemp('./decode_write_XXXXXX'))
     file:close()
     assert(os.remove(pathname))
@@ -80,8 +80,24 @@ local function check_write_failure(payload, chunksize)
     assert.not_nil(multipart.EDECODE)
     assert.equal(errlib.typeof(err), multipart.EDECODE)
     assert.not_nil(errlib.is(err, errno.EFBIG))
-    assert.equal(errlib.is(err, errno.EFBIG).op, 'write')
+    assert.equal(errlib.is(err, errno.EFBIG).op, operation or 'write')
     assert.empty(files_with_prefix(prefix))
+end
+
+function testcase.decode_rewinds_buffered_file_data_before_returning()
+    local input = '--b\r\nContent-Disposition: form-data; name="foo"; filename="x"' ..
+        '\r\n\r\nsmall buffered payload\r\n--b--'
+    local form, err, timeout = multipart.decode(input, 'b', './decode_write_success')
+    assert.is_nil(err)
+    assert.is_nil(timeout)
+    local part = form.foo[1]
+    local file = part.file
+    local position = file:seek()
+    local data = file:read('*a')
+    file:close()
+    os.remove(part.pathname)
+    assert.equal(position, 0)
+    assert.equal(data, 'small buffered payload')
 end
 
 function testcase.decode_returns_write_error_before_boundary()
@@ -95,4 +111,9 @@ end
 
 function testcase.decode_returns_write_error_while_streaming_newline_free_body()
     check_write_failure(string.rep('x', 65536), 4096)
+end
+
+function testcase.decode_returns_rewind_error_for_buffered_file_data()
+    -- A small write stays in stdio until rewinding flushes the file.
+    check_write_failure('small buffered payload', nil, 'seek')
 end

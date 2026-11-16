@@ -165,7 +165,7 @@ function testcase.decode_legacy_unlimited_total_keeps_previous_read_requests()
 end
 
 function testcase.decode_maxsize_argument_contract_violations_raise()
-    for _, value in ipairs({ false, true, '1', {}, -1.5, 1.5, math.huge, -math.huge, 0 / 0 }) do
+    for _, value in ipairs({ false, true, '1', {}, -1.5, 1.5, -math.huge, 0 / 0 }) do
         local calls = 0
         local ok, err = pcall(multipart.decode, {
             read = function() calls = calls + 1 end,

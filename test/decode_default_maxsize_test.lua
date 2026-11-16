@@ -80,3 +80,21 @@ function testcase.decode_keeps_legacy_total_sizes_unlimited()
         end
     end
 end
+
+function testcase.decode_accepts_positive_infinity_as_unlimited_total()
+    local input, data = text_body(default_size + 1)
+    local source = reader(input)
+    local read = source.read
+    source.read = function(self, n)
+        assert.equal(n, 4096)
+        return read(self, n)
+    end
+    local opts = { maxsize = math.huge, chunksize = 4096 }
+    for _, chunk in ipairs({ input, source }) do
+        local form, err, timeout = multipart.decode(chunk, 'b', opts)
+        assert.is_nil(err)
+        assert.is_nil(timeout)
+        assert.equal(form.text[1].data, data)
+    end
+    assert.equal(opts, { maxsize = math.huge, chunksize = 4096 })
+end

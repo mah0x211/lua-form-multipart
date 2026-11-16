@@ -64,7 +64,7 @@ encode a form table to string in `multipart/form-data` format.
                         ...
                     }
                 },
-                data = <value>:string|nil
+                data = <value>:string|number|boolean|nil
                 -- if the filename field defined, add `filename="<filename>"` 
                 -- value to the Content-Disposition header
                 filename = <value>:string|nil,
@@ -200,7 +200,10 @@ local n = assert(multipart.encode({
     end,
     writefile = function(self, f, len, offset, part)
         f:seek('set', offset)
-        local s, err = f:read(len)
+        local s, err = ''
+        if len > 0 then
+            s, err = f:read(len)
+        end
         if part.is_tmpfile then
             f:close()
         end

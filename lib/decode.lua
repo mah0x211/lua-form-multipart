@@ -42,6 +42,7 @@ local gcfn = require('gcfn')
 local errorf = require('error').format
 local toerror = require('error').toerror
 local new_errno = require('errno').new
+local is_errno = require('errno').is
 local new_error_type = require('error').type.new
 local common = require('form.multipart.common')
 local is_valid_boundary = common.is_valid_boundary
@@ -667,7 +668,12 @@ local function discard_form(form)
                     part.file:close()
                 end
                 if part.pathname then
-                    remove(part.pathname)
+                    local ok, _, errnum = remove(part.pathname)
+                    -- Once the path is gone, GC must not remove a later file
+                    -- created at the same path. Keep retries for other errors.
+                    if part.gc and (ok or is_errno(errnum, 'ENOENT')) then
+                        part.gc:disable()
+                    end
                 end
             end
         end

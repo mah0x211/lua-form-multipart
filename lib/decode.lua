@@ -868,8 +868,8 @@ local function checkopts(has_reader, ...)
         maxsize = huge
     elseif maxsize == nil then
         maxsize = DEFAULT_MAX_SIZE
-    elseif not is_int(maxsize) then
-        error('maxsize must be integer', 3)
+    elseif maxsize ~= huge and not is_int(maxsize) then
+        error('maxsize must be integer or math.huge', 3)
     elseif maxsize < 0 then
         maxsize = 0
     end
